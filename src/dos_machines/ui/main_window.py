@@ -46,7 +46,8 @@ class MainWindow(QMainWindow):
         self._view.setRootIndex(self._model.index(str(self._workspace_service.workspace_path)))
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
-        self._view.doubleClicked.connect(self._activate_index)
+        # Follow the desktop environment's activation preference.
+        self._view.activated.connect(self._activate_index)
         self.setCentralWidget(self._view)
 
         self._build_menus()
