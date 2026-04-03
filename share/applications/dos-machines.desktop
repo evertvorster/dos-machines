@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=DOS Machines
+Comment=Folder-based DOS machine workspace and launcher editor
+Exec=dos-machines
+Icon=dos-machines
+Terminal=false
+Categories=Game;Emulator;
+Keywords=DOS;DOSBox;games;launcher;retro;
+StartupNotify=true
