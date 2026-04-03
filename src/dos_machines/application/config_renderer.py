@@ -28,10 +28,11 @@ class ConfigRenderer:
                 f"mount c \"{profile.game.game_dir}\"",
                 "c:",
                 self._render_cd(profile),
-                profile.game.executable,
-                "",
             ]
         )
+        if profile.game.executable:
+            lines.append(profile.game.executable)
+        lines.append("")
 
         for section in sorted(profile.raw_overrides):
             if section not in {schema_section.name for schema_section in schema.sections}:

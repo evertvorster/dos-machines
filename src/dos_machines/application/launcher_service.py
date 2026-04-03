@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import configparser
 from pathlib import Path
+import shlex
+import subprocess
 
 from dos_machines.domain.models import MachineProfile
 
@@ -42,3 +45,19 @@ class LauncherService:
             "",
         ]
         return "\n".join(lines)
+
+    def launch_launcher(self, launcher_path: Path) -> None:
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read(launcher_path, encoding="utf-8")
+        if not parser.has_section("Desktop Entry"):
+            raise ValueError(f"Invalid desktop entry: {launcher_path}")
+        section = parser["Desktop Entry"]
+        exec_value = section.get("Exec", "").strip()
+        if not exec_value:
+            raise ValueError(f"Desktop entry has no Exec line: {launcher_path}")
+        working_dir = section.get("Path", "").strip() or None
+        subprocess.Popen(
+            shlex.split(exec_value),
+            cwd=working_dir,
+            start_new_session=True,
+        )

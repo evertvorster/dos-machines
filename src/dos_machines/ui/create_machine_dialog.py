@@ -75,7 +75,7 @@ class CreateMachineDialog(QDialog):
         metadata_form = QFormLayout()
         metadata_form.addRow("Title", self.title_edit)
         metadata_form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
-        metadata_form.addRow("Executable", self.executable_edit)
+        metadata_form.addRow("Executable", self._with_browse(self.executable_edit, self._browse_executable))
         metadata_form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
         metadata_form.addRow("", self._load_engine_button)
 
@@ -134,6 +134,21 @@ class CreateMachineDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary")
         if path:
             self.engine_binary_edit.setText(path)
+
+    def _browse_executable(self) -> None:
+        start_dir = self.game_dir_edit.text().strip() or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, "Select Game Executable", start_dir)
+        if path:
+            selected = Path(path)
+            game_dir = self.game_dir_edit.text().strip()
+            if game_dir:
+                try:
+                    relative = selected.relative_to(Path(game_dir))
+                    self.executable_edit.setText(str(relative).replace("/", "\\"))
+                    return
+                except ValueError:
+                    pass
+            self.executable_edit.setText(selected.name)
 
     def _load_schema(self) -> None:
         binary_path = Path(self.engine_binary_edit.text().strip()).expanduser()
@@ -309,8 +324,8 @@ class CreateMachineDialog(QDialog):
         self._show_current_option()
 
     def _validate_before_accept(self) -> None:
-        if not self.title_edit.text().strip() or not self.game_dir_edit.text().strip() or not self.executable_edit.text().strip():
-            QMessageBox.warning(self, "Missing Fields", "Title, game directory, and executable are required.")
+        if not self.title_edit.text().strip() or not self.game_dir_edit.text().strip():
+            QMessageBox.warning(self, "Missing Fields", "Title and game directory are required.")
             return
         if self._schema is None or not self._ordered_options:
             QMessageBox.warning(self, "Schema Not Loaded", "Load the engine schema before creating a machine.")
