@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QFileSystemModel,
     QInputDialog,
@@ -99,23 +100,25 @@ class MainWindow(QMainWindow):
 
     def _add_machine(self) -> None:
         dialog = CreateMachineDialog(self._workspace_service.workspace_path, self)
-        if dialog.exec() == dialog.Accepted:
-            request = dialog.build_request()
-            if not request.title or not request.executable or not str(request.game_dir):
-                QMessageBox.warning(self, "Missing Fields", "Title, game directory, and executable are required.")
-                return
-            try:
-                profile = self._profile_service.create(request)
-                self._launcher_service.create_launcher(profile, request.workspace_dir)
-            except FileExistsError:
-                QMessageBox.information(
-                    self,
-                    "Already Registered",
-                    "That game directory already contains a DOS Machines profile.",
-                )
-            except Exception as exc:  # pragma: no cover - UI safety net
-                QMessageBox.critical(self, "Create Machine Failed", str(exc))
-            self._refresh()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        request = dialog.build_request()
+        if not request.title or not request.executable or not str(request.game_dir):
+            QMessageBox.warning(self, "Missing Fields", "Title, game directory, and executable are required.")
+            return
+        try:
+            profile = self._profile_service.create(request)
+            self._launcher_service.create_launcher(profile, request.workspace_dir)
+        except FileExistsError:
+            QMessageBox.information(
+                self,
+                "Already Registered",
+                "That game directory already contains a DOS Machines profile.",
+            )
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Create Machine Failed", str(exc))
+        self._refresh()
 
     def _open_context_menu(self, point) -> None:
         menu = QMenu(self)
