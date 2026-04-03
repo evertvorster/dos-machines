@@ -8,7 +8,7 @@ import shutil
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
-from dos_machines.domain.models import AppPaths, GameTargets, MachineProfile
+from dos_machines.domain.models import AppPaths, GameTargets, MachineProfile, OptionState
 
 
 @dataclass(slots=True)
@@ -23,6 +23,7 @@ class CreateProfileRequest:
     setup_executable: str | None = None
     notes: str = ""
     icon_source: Path | None = None
+    option_states: dict[str, dict[str, OptionState]] | None = None
 
 
 class ProfileService:
@@ -59,6 +60,7 @@ class ProfileService:
             raise FileExistsError(f"Game is already registered: {profile_path}")
 
         engine_cache = self._engine_registry.register(request.engine_binary)
+        schema = self._engine_registry.load_schema(engine_cache.ref.engine_id)
         machine_id = uuid4().hex
         working_dir = game_dir
         profile = MachineProfile(
@@ -71,6 +73,7 @@ class ProfileService:
                 executable=request.executable,
                 setup_executable=request.setup_executable,
             ),
+            option_states=request.option_states or self._default_option_states(schema),
         )
         if request.icon_source is not None:
             icon_target = managed_dir / "icon.png"
@@ -85,8 +88,9 @@ class ProfileService:
         managed_dir.mkdir(parents=True, exist_ok=True)
         profile_path = managed_dir / "profile.json"
         config_path = managed_dir / "dosbox.conf"
+        schema = self._engine_registry.load_schema(profile.engine.engine_id)
         profile_path.write_text(profile.dumps(), encoding="utf-8")
-        config_path.write_text(self._config_renderer.render(profile), encoding="utf-8")
+        config_path.write_text(self._config_renderer.render(profile, schema), encoding="utf-8")
 
     def load(self, profile_path: Path) -> MachineProfile:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -101,3 +105,13 @@ class ProfileService:
         from dos_machines.domain.models import PresetRef
 
         return PresetRef(preset_id=preset_id, start_mode=start_mode)
+
+    def _default_option_states(self, schema) -> dict[str, dict[str, OptionState]]:
+        return {
+            section.name: {
+                option.name: OptionState(value=option.default_value, checked=False, origin="default")
+                for option in section.options
+            }
+            for section in schema.sections
+            if section.name != "autoexec"
+        }

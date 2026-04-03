@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 from dos_machines.application.launcher_service import LauncherService
+from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import ProfileService
+from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.application.workspace_service import WorkspaceService
 from dos_machines.ui.create_machine_dialog import CreateMachineDialog
@@ -29,12 +31,16 @@ class MainWindow(QMainWindow):
         workspace_service: WorkspaceService,
         profile_service: ProfileService,
         launcher_service: LauncherService,
+        engine_registry: EngineRegistry,
+        preset_service: PresetService,
     ) -> None:
         super().__init__()
         self._settings_service = settings_service
         self._workspace_service = workspace_service
         self._profile_service = profile_service
         self._launcher_service = launcher_service
+        self._engine_registry = engine_registry
+        self._preset_service = preset_service
         self.setWindowTitle("DOS Machines")
         self.resize(960, 640)
 
@@ -100,14 +106,16 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _add_machine(self) -> None:
-        dialog = CreateMachineDialog(self._workspace_service.workspace_path, self)
+        dialog = CreateMachineDialog(
+            self._workspace_service.workspace_path,
+            self._engine_registry,
+            self._preset_service,
+            self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         request = dialog.build_request()
-        if not request.title or not request.executable or not str(request.game_dir):
-            QMessageBox.warning(self, "Missing Fields", "Title, game directory, and executable are required.")
-            return
         try:
             profile = self._profile_service.create(request)
             self._launcher_service.create_launcher(profile, request.workspace_dir)
