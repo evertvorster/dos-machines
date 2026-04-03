@@ -1,32 +1,360 @@
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
+    QLayout,
+    QLayoutItem,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
-from dos_machines.application.preset_service import GRAPHICS_SECTIONS, PresetService
+from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
-from dos_machines.domain.models import EngineSchema, OptionState, SchemaOption
+from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState, SchemaOption, SchemaSection
+
+
+class NoWheelMixin:
+    def wheelEvent(self, event) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+            return
+        event.ignore()
+
+
+class NoWheelComboBox(NoWheelMixin, QComboBox):
+    pass
+
+
+class NoWheelSpinBox(NoWheelMixin, QSpinBox):
+    pass
+
+
+class NoWheelDoubleSpinBox(NoWheelMixin, QDoubleSpinBox):
+    pass
+
+
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin: int = 0, hspacing: int = 12, vspacing: int = 12) -> None:
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self._hspacing = hspacing
+        self._vspacing = vspacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def addWidget(self, widget) -> None:
+        super().addWidget(widget)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            +margins.left(),
+            +margins.top(),
+            -margins.right(),
+            -margins.bottom(),
+        )
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        max_right = effective.right()
+
+        for item in self._items:
+            size = item.sizeHint()
+            next_x = x + size.width() + self._hspacing
+            if line_height > 0 and next_x - self._hspacing > max_right:
+                x = effective.x()
+                y += line_height + self._vspacing
+                next_x = x + size.width() + self._hspacing
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), size))
+
+            x = next_x
+            line_height = max(line_height, size.height())
+
+        return y + line_height - rect.y() + margins.bottom()
+
+
+class SectionEditorDialog(QDialog):
+    def __init__(
+        self,
+        section: SchemaSection,
+        option_states: dict[str, OptionState],
+        preset_service: PresetService,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Section: {section.name}")
+        self.resize(760, 720)
+        self._section = section
+        self._option_states = option_states
+        self._preset_service = preset_service
+        self._field_widgets: dict[str, QWidget] = {}
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._scroll.setWidget(self._content)
+
+        toolbar = QHBoxLayout()
+        self._apply_preset_button = QPushButton("Apply Section Preset")
+        self._apply_preset_button.clicked.connect(self._apply_section_preset)
+        self._save_preset_button = QPushButton("Save Section Preset")
+        self._save_preset_button.clicked.connect(self._save_section_preset)
+        toolbar.addWidget(self._apply_preset_button)
+        toolbar.addWidget(self._save_preset_button)
+        toolbar.addStretch(1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+        layout.addLayout(toolbar)
+        layout.addWidget(self._scroll)
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+        self._rebuild_cards()
+
+    def _rebuild_cards(self) -> None:
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._field_widgets.clear()
+
+        for option in self._section.options:
+            self._content_layout.addWidget(self._build_option_card(option))
+        self._content_layout.addStretch(1)
+
+    def _build_option_card(self, option: SchemaOption) -> QWidget:
+        state = self._option_states[option.name]
+        box = QGroupBox(option.name)
+        layout = QVBoxLayout(box)
+
+        editor = self._build_editor(option, state)
+        self._field_widgets[option.name] = editor
+        layout.addWidget(editor)
+
+        if option.help_text:
+            help_label = QLabel(option.help_text)
+            help_label.setWordWrap(True)
+            help_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            help_label.setTextFormat(Qt.TextFormat.RichText)
+            help_label.setText(self._format_help_text(option.help_text))
+            layout.addWidget(help_label)
+
+        return box
+
+    def _build_editor(self, option: SchemaOption, state: OptionState) -> QWidget:
+        if option.value_type == "boolean":
+            editor = NoWheelComboBox()
+            editor.addItems(["true", "false"])
+            editor.setCurrentText(state.value.lower())
+            editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+            return editor
+        if option.value_type in {"enum", "dynamic"} and option.choices:
+            editor = NoWheelComboBox()
+            editor.addItems(option.choices)
+            editor.setEditable(option.value_type == "dynamic")
+            if state.value not in option.choices:
+                editor.addItem(state.value)
+            editor.setCurrentText(state.value)
+            editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+            return editor
+        editor = QLineEdit(state.value)
+        editor.textChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+        return editor
+
+    def _set_value(self, option_name: str, value: str) -> None:
+        state = self._option_states[option_name]
+        state.value = value
+        state.checked = True
+        state.origin = "user"
+
+    def _reset_option(self, option: SchemaOption) -> None:
+        state = self._option_states[option.name]
+        state.value = option.default_value
+        state.checked = False
+        state.origin = "default"
+        widget = self._field_widgets[option.name]
+        if isinstance(widget, QComboBox):
+            widget.setCurrentText(option.default_value)
+        elif isinstance(widget, QLineEdit):
+            widget.setText(option.default_value)
+        self._rebuild_cards()
+
+    def _apply_section_preset(self) -> None:
+        presets = [preset for preset in self._preset_service.load_section_presets() if preset.section_name == self._section.name]
+        if not presets:
+            QMessageBox.information(self, "No Presets", f"No presets saved for section '{self._section.name}'.")
+            return
+        titles = [preset.title for preset in presets]
+        title, accepted = QInputDialog.getItem(self, "Apply Section Preset", "Preset", titles, 0, False)
+        if not accepted or not title:
+            return
+        preset = next(item for item in presets if item.title == title)
+        for option_name, value in preset.sections.get(self._section.name, {}).items():
+            if option_name not in self._option_states:
+                continue
+            self._option_states[option_name].value = value
+            self._option_states[option_name].checked = True
+            self._option_states[option_name].origin = "preset"
+        self._rebuild_cards()
+
+    def _save_section_preset(self) -> None:
+        title, accepted = QInputDialog.getText(self, "Save Section Preset", "Preset name")
+        if not accepted or not title.strip():
+            return
+        values = {
+            option_name: state.value
+            for option_name, state in self._option_states.items()
+            if state.checked
+        }
+        self._preset_service.save_section_preset(title.strip(), self._section.name, values)
+        QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
+
+    def _format_help_text(self, text: str) -> str:
+        lines: list[str] = []
+        for index, raw_line in enumerate(text.splitlines()):
+            stripped = raw_line.strip()
+            if not stripped:
+                lines.append("")
+                continue
+            if self._looks_like_option_line(stripped):
+                prefix, suffix = stripped.split(":", 1)
+                escaped = f"<b>{escape(prefix)}:</b>{escape(suffix)}"
+            else:
+                escaped = escape(stripped)
+                if index > 0:
+                    escaped = f"{'&nbsp;' * 4}{escaped}"
+            lines.append(escaped)
+        return "<br>".join(lines)
+
+    def _looks_like_option_line(self, line: str) -> bool:
+        if line.startswith(("Possible values:", "Deprecated values:", "Notes:", "Note:")):
+            return True
+        if ":" not in line:
+            return False
+        prefix = line.split(":", 1)[0].strip()
+        return bool(prefix) and all(character.isalnum() or character in "_-+<>./%, " for character in prefix)
+
+
+class AutoexecEditorDialog(QDialog):
+    def __init__(self, autoexec_text: str, preset_service: PresetService, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Section: autoexec")
+        self.resize(760, 600)
+        self._preset_service = preset_service
+        self._editor = QTextEdit()
+        self._editor.setPlainText(autoexec_text)
+
+        toolbar = QHBoxLayout()
+        apply_button = QPushButton("Apply Section Preset")
+        apply_button.clicked.connect(self._apply_section_preset)
+        save_button = QPushButton("Save Section Preset")
+        save_button.clicked.connect(self._save_section_preset)
+        toolbar.addWidget(apply_button)
+        toolbar.addWidget(save_button)
+        toolbar.addStretch(1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+        layout.addLayout(toolbar)
+        layout.addWidget(self._editor)
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+    @property
+    def autoexec_text(self) -> str:
+        return self._editor.toPlainText().strip()
+
+    def _apply_section_preset(self) -> None:
+        presets = [preset for preset in self._preset_service.load_section_presets() if preset.section_name == "autoexec"]
+        if not presets:
+            QMessageBox.information(self, "No Presets", "No presets saved for section 'autoexec'.")
+            return
+        titles = [preset.title for preset in presets]
+        title, accepted = QInputDialog.getItem(self, "Apply Section Preset", "Preset", titles, 0, False)
+        if not accepted or not title:
+            return
+        preset = next(item for item in presets if item.title == title)
+        self._editor.setPlainText(preset.sections.get("autoexec", {}).get("__text__", ""))
+
+    def _save_section_preset(self) -> None:
+        title, accepted = QInputDialog.getText(self, "Save Section Preset", "Preset name")
+        if not accepted or not title.strip():
+            return
+        self._preset_service.save_section_preset(title.strip(), "autoexec", {"__text__": self.autoexec_text})
+        QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
 
 
 class CreateMachineDialog(QDialog):
@@ -35,87 +363,109 @@ class CreateMachineDialog(QDialog):
         workspace_dir: Path,
         engine_registry: EngineRegistry,
         preset_service: PresetService,
+        profile: MachineProfile | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Add New Machine")
-        self.resize(860, 720)
+        self.setWindowTitle("Configure Machine" if profile is not None else "Add New Machine")
+        self.resize(980, 760)
         self._workspace_dir = workspace_dir
         self._engine_registry = engine_registry
         self._preset_service = preset_service
+        self._renderer = ConfigRenderer()
+        self._profile = profile
         self._schema: EngineSchema | None = None
-        self._current_index = 0
-        self._ordered_options: list[tuple[str, SchemaOption]] = []
         self._option_states: dict[str, dict[str, OptionState]] = {}
-        self._value_widget: QWidget | None = None
+        self._section_buttons: dict[str, QPushButton] = {}
+        self._autoexec_text = profile.autoexec_text if profile is not None else ""
 
-        self.title_edit = QLineEdit()
-        self.game_dir_edit = QLineEdit()
-        self.executable_edit = QLineEdit()
-        self.engine_binary_edit = QLineEdit("/usr/bin/dosbox")
+        self.title_edit = QLineEdit(profile.identity.title if profile else "")
+        self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else "")
+        self.executable_edit = QLineEdit(profile.game.executable if profile else "")
+        self.engine_binary_edit = QLineEdit(str(profile.engine.binary_path) if profile else "/usr/bin/dosbox")
+        self.setup_executable_edit = QLineEdit(profile.game.setup_executable or "" if profile else "")
 
         self._load_engine_button = QPushButton("Load Engine Schema")
         self._load_engine_button.clicked.connect(self._load_schema)
+        self._save_machine_preset_button = QPushButton("Save Machine Preset")
+        self._save_machine_preset_button.clicked.connect(self._save_machine_preset)
+        self._apply_machine_preset_button = QPushButton("Apply Machine Preset")
+        self._apply_machine_preset_button.clicked.connect(self._apply_machine_preset)
+        self._config_preview = QTextEdit()
+        self._config_preview.setReadOnly(True)
 
-        self._section_label = QLabel("No engine loaded")
-        self._option_label = QLabel("Choose a DOSBox binary to begin")
-        self._help_text = QTextEdit()
-        self._help_text.setReadOnly(True)
-        self._explicit_check = QCheckBox("Mark this option as set")
-        self._explicit_check.toggled.connect(self._explicit_toggled)
-        self._previous_button = QPushButton("Previous")
-        self._previous_button.clicked.connect(self._go_previous)
-        self._next_button = QPushButton("Next")
-        self._next_button.clicked.connect(self._go_next)
-        self._save_preset_button = QPushButton("Save Graphics Preset")
-        self._save_preset_button.clicked.connect(self._save_graphics_preset)
-        self._apply_preset_button = QPushButton("Apply Graphics Preset")
-        self._apply_preset_button.clicked.connect(self._apply_graphics_preset)
-
-        metadata_form = QFormLayout()
-        metadata_form.addRow("Title", self.title_edit)
-        metadata_form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
-        metadata_form.addRow("Executable", self._with_browse(self.executable_edit, self._browse_executable))
-        metadata_form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
-        metadata_form.addRow("", self._load_engine_button)
-
-        option_box = QGroupBox("Guided Config Editor")
-        self._option_layout = QVBoxLayout()
-        self._option_layout.addWidget(self._section_label)
-        self._option_layout.addWidget(self._option_label)
-        self._editor_host = QVBoxLayout()
-        self._option_layout.addLayout(self._editor_host)
-        self._option_layout.addWidget(self._explicit_check)
-        self._option_layout.addWidget(self._help_text)
-        nav_row = QHBoxLayout()
-        nav_row.addWidget(self._previous_button)
-        nav_row.addWidget(self._next_button)
-        nav_row.addStretch(1)
-        nav_row.addWidget(self._apply_preset_button)
-        nav_row.addWidget(self._save_preset_button)
-        self._option_layout.addLayout(nav_row)
-        option_box.setLayout(self._option_layout)
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_metadata_tab(), "Machine")
+        self._tabs.addTab(self._build_sections_tab(), "Sections")
+        self._tabs.addTab(self._build_preview_tab(), "Config Preview")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._validate_before_accept)
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout()
-        layout.addLayout(metadata_form)
-        layout.addWidget(option_box)
+        layout.addWidget(self._tabs)
         layout.addWidget(buttons)
         self.setLayout(layout)
-        self._refresh_navigation()
+
+        if profile is not None:
+            self._load_schema_from_profile()
+        self._sync_buttons()
 
     def build_request(self) -> CreateProfileRequest:
+        existing_profile_path = None
+        if self._profile is not None:
+            existing_profile_path = self._profile.game.game_dir / ".dosmachines" / "profile.json"
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
             game_dir=Path(self.game_dir_edit.text().strip()).expanduser(),
             executable=self.executable_edit.text().strip(),
             engine_binary=Path(self.engine_binary_edit.text().strip()).expanduser(),
             workspace_dir=self._workspace_dir,
+            setup_executable=self.setup_executable_edit.text().strip() or None,
             option_states=self._option_states,
+            autoexec_text=self._autoexec_text,
+            existing_profile_path=existing_profile_path,
         )
+
+    def _build_metadata_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        form = QFormLayout()
+        form.addRow("Title", self.title_edit)
+        form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
+        form.addRow("Executable", self._with_browse(self.executable_edit, self._browse_executable))
+        form.addRow("Setup Executable", self._with_browse(self.setup_executable_edit, self._browse_setup_executable))
+        form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
+        form.addRow("", self._load_engine_button)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        return tab
+
+    def _build_sections_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(self._apply_machine_preset_button)
+        toolbar.addWidget(self._save_machine_preset_button)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        self._sections_host = QWidget()
+        self._sections_flow = FlowLayout(self._sections_host, margin=8, hspacing=12, vspacing=12)
+        self._sections_host.setLayout(self._sections_flow)
+        scroll_area.setWidget(self._sections_host)
+        layout.addWidget(scroll_area)
+        return tab
+
+    def _build_preview_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel("Generated config preview"))
+        layout.addWidget(self._config_preview)
+        return tab
 
     def _with_browse(self, line_edit: QLineEdit, callback) -> QHBoxLayout:
         button = QPushButton("Browse…")
@@ -126,29 +476,56 @@ class CreateMachineDialog(QDialog):
         return layout
 
     def _browse_game_dir(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select Game Directory")
+        path = QFileDialog.getExistingDirectory(self, "Select Game Directory", self.game_dir_edit.text().strip())
         if path:
             self.game_dir_edit.setText(path)
+            self._update_preview()
 
     def _browse_engine_binary(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary")
+        path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary", self.engine_binary_edit.text().strip())
         if path:
             self.engine_binary_edit.setText(path)
 
     def _browse_executable(self) -> None:
+        self._browse_relative_file(self.executable_edit, "Select Game Executable")
+
+    def _browse_setup_executable(self) -> None:
+        self._browse_relative_file(self.setup_executable_edit, "Select Setup Executable")
+
+    def _browse_relative_file(self, target_edit: QLineEdit, title: str) -> None:
         start_dir = self.game_dir_edit.text().strip() or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(self, "Select Game Executable", start_dir)
-        if path:
-            selected = Path(path)
-            game_dir = self.game_dir_edit.text().strip()
-            if game_dir:
-                try:
-                    relative = selected.relative_to(Path(game_dir))
-                    self.executable_edit.setText(str(relative).replace("/", "\\"))
-                    return
-                except ValueError:
-                    pass
-            self.executable_edit.setText(selected.name)
+        path, _ = QFileDialog.getOpenFileName(self, title, start_dir)
+        if not path:
+            return
+        selected = Path(path)
+        game_dir = self.game_dir_edit.text().strip()
+        if game_dir:
+            try:
+                relative = selected.relative_to(Path(game_dir))
+                target_edit.setText(str(relative).replace("/", "\\"))
+                self._update_preview()
+                return
+            except ValueError:
+                pass
+        target_edit.setText(selected.name)
+        self._update_preview()
+
+    def _load_schema_from_profile(self) -> None:
+        assert self._profile is not None
+        cache = self._engine_registry.register(self._profile.engine.binary_path)
+        self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
+        self._option_states = {
+            section.name: {
+                option.name: self._profile.option_states.get(section.name, {}).get(
+                    option.name,
+                    OptionState(value=option.default_value, checked=False, origin="default"),
+                )
+                for option in section.options
+            }
+            for section in self._schema.sections
+        }
+        self._autoexec_text = self._profile.autoexec_text or self._renderer.default_autoexec_text(self._profile.game)
+        self._rebuild_sections_overview()
 
     def _load_schema(self) -> None:
         binary_path = Path(self.engine_binary_edit.text().strip()).expanduser()
@@ -162,184 +539,174 @@ class CreateMachineDialog(QDialog):
             QMessageBox.critical(self, "Engine Load Failed", str(exc))
             return
 
+        existing_option_states = self._option_states
         self._option_states = {
             section.name: {
-                option.name: OptionState(value=option.default_value, checked=False, origin="default")
+                option.name: existing_option_states.get(section.name, {}).get(
+                    option.name,
+                    OptionState(value=option.default_value, checked=False, origin="default"),
+                )
                 for option in section.options
             }
             for section in self._schema.sections
-            if section.name != "autoexec"
         }
-        self._ordered_options = [
-            (section.name, option)
-            for section in self._schema.sections
-            if section.name != "autoexec"
-            for option in section.options
-        ]
-        self._current_index = 0
-        self._show_current_option()
+        if not self._autoexec_text:
+            from dos_machines.domain.models import GameTargets
 
-    def _show_current_option(self) -> None:
-        if not self._ordered_options:
-            self._section_label.setText("No schema options loaded")
-            self._option_label.setText("Choose a DOSBox binary to begin")
-            self._help_text.clear()
-            self._clear_editor_host()
-            self._refresh_navigation()
-            return
+            game_dir = Path(self.game_dir_edit.text().strip() or ".").expanduser()
+            self._autoexec_text = self._renderer.default_autoexec_text(
+                GameTargets(
+                    game_dir=game_dir,
+                    working_dir=game_dir,
+                    executable=self.executable_edit.text().strip(),
+                    setup_executable=self.setup_executable_edit.text().strip() or None,
+                )
+            )
+        self._rebuild_sections_overview()
 
-        section_name, option = self._ordered_options[self._current_index]
-        state = self._option_states[section_name][option.name]
-        self._section_label.setText(f"[{section_name}]")
-        self._option_label.setText(option.name)
-        self._option_label.setToolTip(option.help_text)
-        self._help_text.setPlainText(option.help_text)
-        self._explicit_check.blockSignals(True)
-        self._explicit_check.setChecked(state.checked)
-        self._explicit_check.blockSignals(False)
-
-        self._clear_editor_host()
-        widget = self._build_editor(option, state)
-        self._value_widget = widget
-        self._editor_host.addWidget(widget)
-        self._refresh_navigation()
-
-    def _build_editor(self, option: SchemaOption, state: OptionState) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        description = QLabel(option.description)
-        description.setWordWrap(True)
-        layout.addWidget(description)
-
-        if option.value_type == "boolean":
-            editor = QComboBox()
-            editor.addItems(["true", "false"])
-            editor.setCurrentText(state.value.lower())
-            editor.currentTextChanged.connect(self._value_changed)
-        elif option.value_type in {"enum", "dynamic"}:
-            editor = QComboBox()
-            editor.addItems(option.choices or [state.value])
-            editor.setEditable(option.value_type == "dynamic")
-            if state.value not in option.choices:
-                editor.addItem(state.value)
-            editor.setCurrentText(state.value)
-            editor.currentTextChanged.connect(self._value_changed)
-        else:
-            editor = QLineEdit(state.value)
-            editor.textChanged.connect(self._value_changed)
-        editor.setToolTip(option.help_text)
-        layout.addWidget(editor)
-
-        if option.choices:
-            choices_label = QLabel("Options: " + ", ".join(option.choices))
-            choices_label.setWordWrap(True)
-            layout.addWidget(choices_label)
-
-        return container
-
-    def _clear_editor_host(self) -> None:
-        while self._editor_host.count():
-            item = self._editor_host.takeAt(0)
+    def _rebuild_sections_overview(self) -> None:
+        while self._sections_flow.count():
+            item = self._sections_flow.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
-
-    def _current_state(self) -> OptionState:
-        section_name, option = self._ordered_options[self._current_index]
-        return self._option_states[section_name][option.name]
-
-    def _current_option(self) -> tuple[str, SchemaOption]:
-        return self._ordered_options[self._current_index]
-
-    def _value_changed(self, value: str) -> None:
-        state = self._current_state()
-        state.value = value
-
-    def _explicit_toggled(self, checked: bool) -> None:
-        state = self._current_state()
-        state.checked = checked
-        state.origin = "user" if checked else "default"
-        self._refresh_navigation()
-
-    def _go_previous(self) -> None:
-        if self._current_index == 0:
+        self._section_buttons.clear()
+        if self._schema is None:
+            self._update_preview()
+            self._sync_buttons()
             return
-        self._current_index -= 1
-        self._show_current_option()
 
-    def _go_next(self) -> None:
-        if not self._ordered_options:
-            return
-        if not self._current_state().checked:
-            QMessageBox.information(self, "Option Not Marked", "Check the option before moving on.")
-            return
-        if self._current_index >= len(self._ordered_options) - 1:
-            return
-        self._current_index += 1
-        self._show_current_option()
+        for section in self._schema.sections:
+            button = QPushButton(section.name)
+            button.clicked.connect(lambda _=False, name=section.name: self._open_section_dialog(name))
+            self._section_buttons[section.name] = button
+            self._sections_flow.addWidget(button)
 
-    def _refresh_navigation(self) -> None:
-        has_options = bool(self._ordered_options)
-        self._previous_button.setEnabled(has_options and self._current_index > 0)
-        self._next_button.setEnabled(has_options and self._current_state().checked if has_options else False)
-        self._save_preset_button.setEnabled(has_options)
-        self._apply_preset_button.setEnabled(has_options)
+        self._update_preview()
+        self._sync_buttons()
 
-    def _save_graphics_preset(self) -> None:
-        if not self._option_states:
+    def _open_section_dialog(self, section_name: str) -> None:
+        if section_name == "autoexec":
+            dialog = AutoexecEditorDialog(self._autoexec_text, self._preset_service, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            self._autoexec_text = dialog.autoexec_text
+            self._update_preview()
             return
-        title, accepted = QInputDialog.getText(self, "Save Graphics Preset", "Preset name")
+        if self._schema is None:
+            return
+        section = next((item for item in self._schema.sections if item.name == section_name), None)
+        if section is None:
+            return
+        dialog = SectionEditorDialog(
+            section=section,
+            option_states=self._option_states[section_name],
+            preset_service=self._preset_service,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._update_preview()
+
+    def _sync_buttons(self) -> None:
+        enabled = self._schema is not None
+        self._save_machine_preset_button.setEnabled(enabled)
+        self._apply_machine_preset_button.setEnabled(enabled)
+
+    def _save_machine_preset(self) -> None:
+        if self._schema is None:
+            return
+        title, accepted = QInputDialog.getText(self, "Save Machine Preset", "Preset name")
         if not accepted or not title.strip():
             return
         values = {
-            section: {
-                name: state.value
-                for name, state in options.items()
+            section_name: {
+                option_name: state.value
+                for option_name, state in options.items()
                 if state.checked
             }
-            for section, options in self._option_states.items()
-            if section in GRAPHICS_SECTIONS
+            for section_name, options in self._option_states.items()
+            if section_name != "autoexec"
         }
-        self._preset_service.save_graphics_preset(title.strip(), values)
-        QMessageBox.information(self, "Preset Saved", f"Saved graphics preset '{title.strip()}'.")
+        if self._autoexec_text.strip():
+            values["autoexec"] = {"__text__": self._autoexec_text.strip()}
+        self._preset_service.save_machine_preset(title.strip(), values)
+        QMessageBox.information(self, "Preset Saved", f"Saved machine preset '{title.strip()}'.")
 
-    def _apply_graphics_preset(self) -> None:
-        presets = self._preset_service.load_graphics_presets()
+    def _apply_machine_preset(self) -> None:
+        presets = self._preset_service.load_machine_presets()
         if not presets:
-            QMessageBox.information(self, "No Presets", "No graphics presets have been saved yet.")
+            QMessageBox.information(self, "No Presets", "No machine presets have been saved yet.")
             return
         titles = [preset.title for preset in presets]
-        title, accepted = QInputDialog.getItem(self, "Apply Graphics Preset", "Preset", titles, 0, False)
+        title, accepted = QInputDialog.getItem(self, "Apply Machine Preset", "Preset", titles, 0, False)
         if not accepted or not title:
             return
-        preset = next(preset for preset in presets if preset.title == title)
-        for section, options in preset.sections.items():
-            for name, value in options.items():
-                if section not in self._option_states or name not in self._option_states[section]:
+        preset = next(item for item in presets if item.title == title)
+        resolved = self._preset_service.resolve_machine_preset(preset.preset_id)
+        for section_name, values in resolved.items():
+            if section_name == "autoexec":
+                self._autoexec_text = values.get("__text__", self._autoexec_text)
+                continue
+            if section_name not in self._option_states:
+                continue
+            for name, value in values.items():
+                state = self._option_states[section_name].get(name)
+                if state is None:
                     continue
-                state = self._option_states[section][name]
                 state.value = value
                 state.checked = True
                 state.origin = "preset"
-        self._show_current_option()
+        self._update_preview()
+
+    def _preview_profile(self) -> MachineProfile | None:
+        if self._schema is None:
+            return None
+        engine_binary = Path(self.engine_binary_edit.text().strip()).expanduser()
+        try:
+            cache = self._engine_registry.register(engine_binary)
+        except Exception:
+            return None
+        if self._profile is not None:
+            machine_id = self._profile.identity.machine_id
+            ui_state = self._profile.ui
+            provenance = self._profile.provenance
+        else:
+            machine_id = "preview"
+            from dos_machines.domain.models import UiState, Provenance
+            ui_state = UiState()
+            provenance = Provenance()
+        from dos_machines.domain.models import GameTargets, PresetRef, ProfileIdentity
+
+        game_dir = Path(self.game_dir_edit.text().strip() or ".").expanduser()
+        return MachineProfile(
+            identity=ProfileIdentity(machine_id=machine_id, title=self.title_edit.text().strip() or "Preview"),
+            engine=cache.ref,
+            preset=PresetRef(preset_id="manual", start_mode="manual"),
+            game=GameTargets(
+                game_dir=game_dir,
+                working_dir=game_dir,
+                executable=self.executable_edit.text().strip(),
+                setup_executable=self.setup_executable_edit.text().strip() or None,
+            ),
+            ui=ui_state,
+            option_states=self._option_states,
+            autoexec_text=self._autoexec_text,
+            provenance=provenance,
+        )
+
+    def _update_preview(self) -> None:
+        preview_profile = self._preview_profile()
+        if preview_profile is None or self._schema is None:
+            self._config_preview.clear()
+            return
+        self._config_preview.setPlainText(self._renderer.render(preview_profile, self._schema))
 
     def _validate_before_accept(self) -> None:
         if not self.title_edit.text().strip() or not self.game_dir_edit.text().strip():
             QMessageBox.warning(self, "Missing Fields", "Title and game directory are required.")
             return
-        if self._schema is None or not self._ordered_options:
-            QMessageBox.warning(self, "Schema Not Loaded", "Load the engine schema before creating a machine.")
-            return
-        unchecked = [
-            f"{section}.{option.name}"
-            for section, option in self._ordered_options
-            if not self._option_states[section][option.name].checked
-        ]
-        if unchecked:
-            QMessageBox.warning(
-                self,
-                "Incomplete Config",
-                f"Review and mark all options before finishing.\nFirst remaining: {unchecked[0]}",
-            )
+        if self._schema is None:
+            QMessageBox.warning(self, "Schema Not Loaded", "Load the engine schema before saving.")
             return
         self.accept()

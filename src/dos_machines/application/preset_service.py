@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import uuid4
 import json
 
-from dos_machines.domain.models import AppPaths, GraphicsPreset
-
-
-GRAPHICS_SECTIONS = {"sdl", "render"}
+from dos_machines.domain.models import AppPaths, MachinePreset, SectionPreset
 
 
 class PresetService:
@@ -15,35 +11,80 @@ class PresetService:
         self._app_paths = app_paths
         self._user_presets_path = self._app_paths.presets_root / "user-presets.json"
 
-    def load_graphics_presets(self) -> list[GraphicsPreset]:
-        if not self._user_presets_path.exists():
-            return []
-        payload = json.loads(self._user_presets_path.read_text(encoding="utf-8"))
-        return [GraphicsPreset.from_json(item) for item in payload.get("graphics_presets", [])]
+    def load_section_presets(self) -> list[SectionPreset]:
+        payload = self._load_payload()
+        return [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
 
-    def save_graphics_preset(self, title: str, option_states: dict[str, dict[str, str]]) -> GraphicsPreset:
-        presets = self.load_graphics_presets()
-        preset = GraphicsPreset(
-            preset_id=f"graphics-{uuid4().hex[:12]}",
+    def load_machine_presets(self) -> list[MachinePreset]:
+        payload = self._load_payload()
+        return [MachinePreset.from_json(item) for item in payload.get("machine_presets", [])]
+
+    def save_section_preset(self, title: str, section_name: str, values: dict[str, str]) -> SectionPreset:
+        payload = self._load_payload()
+        presets = [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
+        preset = SectionPreset(
+            preset_id=f"section-{uuid4().hex[:12]}",
             title=title,
-            sections={
-                section: dict(values)
-                for section, values in option_states.items()
-                if section in GRAPHICS_SECTIONS
-            },
+            section_name=section_name,
+            sections={section_name: dict(values)},
         )
         presets.append(preset)
-        self._persist(presets)
+        payload["section_presets"] = [item.to_json() for item in presets]
+        self._persist(payload)
         return preset
 
-    def _persist(self, presets: list[GraphicsPreset]) -> None:
+    def save_machine_preset(
+        self,
+        title: str,
+        section_values: dict[str, dict[str, str]],
+    ) -> MachinePreset:
+        payload = self._load_payload()
+        section_presets = [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
+        machine_presets = [MachinePreset.from_json(item) for item in payload.get("machine_presets", [])]
+        section_preset_ids: list[str] = []
+        for section_name, values in section_values.items():
+            section_preset = SectionPreset(
+                preset_id=f"section-{uuid4().hex[:12]}",
+                title=f"{title} / {section_name}",
+                section_name=section_name,
+                sections={section_name: dict(values)},
+            )
+            section_presets.append(section_preset)
+            section_preset_ids.append(section_preset.preset_id)
+
+        machine_preset = MachinePreset(
+            preset_id=f"machine-{uuid4().hex[:12]}",
+            title=title,
+            section_preset_ids=section_preset_ids,
+        )
+        machine_presets.append(machine_preset)
+        payload["section_presets"] = [item.to_json() for item in section_presets]
+        payload["machine_presets"] = [item.to_json() for item in machine_presets]
+        self._persist(payload)
+        return machine_preset
+
+    def resolve_machine_preset(self, preset_id: str) -> dict[str, dict[str, str]]:
+        section_presets = {preset.preset_id: preset for preset in self.load_section_presets()}
+        machine_preset = next(
+            preset for preset in self.load_machine_presets() if preset.preset_id == preset_id
+        )
+        resolved: dict[str, dict[str, str]] = {}
+        for section_preset_id in machine_preset.section_preset_ids:
+            section_preset = section_presets.get(section_preset_id)
+            if section_preset is None:
+                continue
+            for section_name, values in section_preset.sections.items():
+                resolved.setdefault(section_name, {}).update(values)
+        return resolved
+
+    def _load_payload(self) -> dict[str, object]:
+        if not self._user_presets_path.exists():
+            return {"section_presets": [], "machine_presets": []}
+        return json.loads(self._user_presets_path.read_text(encoding="utf-8"))
+
+    def _persist(self, payload: dict[str, object]) -> None:
         self._app_paths.presets_root.mkdir(parents=True, exist_ok=True)
         self._user_presets_path.write_text(
-            json.dumps(
-                {"graphics_presets": [preset.to_json() for preset in presets]},
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )

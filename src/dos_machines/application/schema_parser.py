@@ -82,10 +82,10 @@ class ConfigSchemaParser:
                 if current_name is not None:
                     blocks[current_name] = current_lines
                 current_name = header_name
-                current_lines = [content.rstrip()]
+                current_lines = [raw_line.rstrip()]
                 continue
             if current_name is not None:
-                current_lines.append(content.rstrip())
+                current_lines.append(raw_line.rstrip())
         if current_name is not None:
             blocks[current_name] = current_lines
         return blocks
@@ -103,12 +103,13 @@ class ConfigSchemaParser:
         choice_help: dict[str, str] = {}
         possible_values: list[str] = []
         for index, line in enumerate(comment_lines):
-            stripped = line.strip()
+            comment_body = line[1:] if line.startswith("#") else line
+            stripped = comment_body.strip()
             if not stripped:
                 normalized_lines.append("")
                 continue
             if index == 0:
-                header_match = HEADER_RE.match(line)
+                header_match = HEADER_RE.match(comment_body)
                 if header_match:
                     description = header_match.group("text").strip()
                     normalized_lines.append(description)
@@ -119,7 +120,7 @@ class ConfigSchemaParser:
             if possible_match:
                 possible_values = [item.strip().rstrip(".") for item in possible_match.group("values").split(",")]
                 continue
-            value_doc_match = VALUE_DOC_RE.match(line)
+            value_doc_match = VALUE_DOC_RE.match(comment_body)
             if value_doc_match:
                 value_name = value_doc_match.group("name").strip()
                 if value_name != option_name:
@@ -139,6 +140,7 @@ class ConfigSchemaParser:
             value_type=value_type,
             description=description or option_name,
             help_text=help_text,
+            comment_lines=list(comment_lines),
             choices=choices,
             choice_help=choice_help,
             runtime_dependent=option_name in DYNAMIC_OPTIONS,

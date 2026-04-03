@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dos_machines.domain.models import EngineSchema, MachineProfile
+from dos_machines.domain.models import EngineSchema, GameTargets, MachineProfile
 
 
 class ConfigRenderer:
@@ -13,26 +13,22 @@ class ConfigRenderer:
             "",
         ]
         for section in schema.sections:
-            if section.name == "autoexec":
-                continue
             lines.append(f"[{section.name}]")
+            if section.name == "autoexec":
+                lines.extend(self.render_autoexec_text(profile).splitlines())
+                lines.append("")
+                continue
             for option in section.options:
+                for comment_line in option.comment_lines:
+                    lines.append(comment_line if comment_line.startswith("#") else f"#{comment_line}")
                 state = profile.option_states.get(section.name, {}).get(option.name)
                 value = state.value if state is not None else option.default_value
                 lines.append(f"{option.name} = {value}")
+                lines.append("")
+            if section.options:
+                if lines[-1] == "":
+                    pass
             lines.append("")
-
-        lines.extend(
-            [
-                "[autoexec]",
-                f"mount c \"{profile.game.game_dir}\"",
-                "c:",
-                self._render_cd(profile),
-            ]
-        )
-        if profile.game.executable:
-            lines.append(profile.game.executable)
-        lines.append("")
 
         for section in sorted(profile.raw_overrides):
             if section not in {schema_section.name for schema_section in schema.sections}:
@@ -44,11 +40,30 @@ class ConfigRenderer:
         return "\n".join(lines).strip() + "\n"
 
     def _render_cd(self, profile: MachineProfile) -> str:
-        if profile.game.working_dir == profile.game.game_dir:
+        return self._render_cd_from_game(profile.game)
+
+    def _render_cd_from_game(self, game: GameTargets) -> str:
+        if game.working_dir == game.game_dir:
             return "cd \\"
         try:
-            relative = profile.game.working_dir.relative_to(profile.game.game_dir)
+            relative = game.working_dir.relative_to(game.game_dir)
         except ValueError:
             return "cd \\"
         relative_text = str(relative).replace("/", "\\")
         return f"cd \"\\{relative_text}\""
+
+    def render_autoexec_text(self, profile: MachineProfile) -> str:
+        if profile.autoexec_text.strip():
+            return profile.autoexec_text.strip()
+        return self.default_autoexec_text(profile.game)
+
+    def default_autoexec_text(self, game: GameTargets) -> str:
+        lines = [
+            "# Lines in this section are run at startup.",
+            f"mount c \"{game.game_dir}\"",
+            "c:",
+            self._render_cd_from_game(game),
+        ]
+        if game.executable:
+            lines.append(game.executable)
+        return "\n".join(lines)

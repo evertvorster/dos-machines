@@ -18,3 +18,4 @@ def test_schema_parser_extracts_sections_and_choices() -> None:
     assert fullscreen.value_type == "boolean"
     assert glshader.value_type == "dynamic"
     assert "Rendering backend" in output.description
+    assert output.comment_lines[0].startswith("#")

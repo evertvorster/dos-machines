@@ -53,6 +53,7 @@ def test_create_profile_writes_managed_files_and_launcher(tmp_path: Path) -> Non
         engine_binary=binary,
         workspace_dir=workspace_dir,
         option_states=option_states,
+        autoexec_text='mount c "C:\\GAMES\\KEEN4"\nc:\ncd \\',
     )
 
     profile = profile_service.create(request)
@@ -65,7 +66,10 @@ def test_create_profile_writes_managed_files_and_launcher(tmp_path: Path) -> Non
     assert "X-DOSMachines-ProfilePath" in text
     config_text = (game_dir / ".dosmachines" / "dosbox.conf").read_text(encoding="utf-8")
     assert "[sdl]" in config_text
-    assert "KEEN4E.EXE" in config_text
+    assert 'mount c "C:\\GAMES\\KEEN4"' in config_text
+    assert "#              output:" in config_text
+    profile_path = game_dir / ".dosmachines" / "profile.json"
+    assert '"autoexec_text"' in profile_path.read_text(encoding="utf-8")
 
 
 def test_existing_profile_is_detected(tmp_path: Path) -> None:
@@ -98,3 +102,31 @@ def test_existing_profile_is_detected(tmp_path: Path) -> None:
     existing = profile_service.existing_profile(tmp_path / "doom")
     assert existing is not None
     assert existing.identity.title == "DOOM"
+
+
+def test_autoexec_defaults_are_backfilled_for_existing_profiles(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+
+    request = CreateProfileRequest(
+        title="Prince of Persia",
+        game_dir=tmp_path / "pop",
+        executable="PRINCE.EXE",
+        engine_binary=binary,
+        workspace_dir=tmp_path / "workspace",
+        option_states={
+            section.name: {
+                option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                for option in section.options
+            }
+            for section in schema.sections
+            if section.name != "autoexec"
+        },
+    )
+    profile = profile_service.create(request)
+    assert "PRINCE.EXE" in profile.autoexec_text

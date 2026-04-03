@@ -8,7 +8,7 @@ import shutil
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
-from dos_machines.domain.models import AppPaths, GameTargets, MachineProfile, OptionState
+from dos_machines.domain.models import AppPaths, GameTargets, MachineProfile, OptionState, Provenance, UiState
 
 
 @dataclass(slots=True)
@@ -24,6 +24,8 @@ class CreateProfileRequest:
     notes: str = ""
     icon_source: Path | None = None
     option_states: dict[str, dict[str, OptionState]] | None = None
+    autoexec_text: str | None = None
+    existing_profile_path: Path | None = None
 
 
 class ProfileService:
@@ -56,29 +58,43 @@ class ProfileService:
         managed_dir = self.managed_dir(game_dir)
         managed_dir.mkdir(parents=True, exist_ok=True)
         profile_path = managed_dir / "profile.json"
-        if profile_path.exists():
+        if profile_path.exists() and request.existing_profile_path is None:
             raise FileExistsError(f"Game is already registered: {profile_path}")
 
         engine_cache = self._engine_registry.register(request.engine_binary)
         schema = self._engine_registry.load_schema(engine_cache.ref.engine_id)
-        machine_id = uuid4().hex
+        existing = self.load(request.existing_profile_path) if request.existing_profile_path else None
+        machine_id = existing.identity.machine_id if existing is not None else uuid4().hex
         working_dir = game_dir
+        ui_state = existing.ui if existing is not None else UiState()
+        provenance = existing.provenance if existing is not None else Provenance()
+        game_targets = GameTargets(
+            game_dir=game_dir,
+            working_dir=working_dir,
+            executable=request.executable,
+            setup_executable=request.setup_executable,
+        )
         profile = MachineProfile(
             identity=self._build_identity(machine_id, request.title, request.notes),
             engine=engine_cache.ref,
             preset=self._build_preset(request.preset_id, request.start_mode),
-            game=GameTargets(
-                game_dir=game_dir,
-                working_dir=working_dir,
-                executable=request.executable,
-                setup_executable=request.setup_executable,
-            ),
+            game=game_targets,
+            ui=ui_state,
+            provenance=provenance,
             option_states=request.option_states or self._default_option_states(schema),
+            autoexec_text=(
+                request.autoexec_text
+                if request.autoexec_text is not None
+                else existing.autoexec_text if existing is not None and existing.autoexec_text
+                else self._config_renderer.default_autoexec_text(game_targets)
+            ),
         )
         if request.icon_source is not None:
             icon_target = managed_dir / "icon.png"
             shutil.copyfile(request.icon_source, icon_target)
             profile.ui.icon_path = icon_target
+        elif existing is not None and existing.ui.icon_path is not None:
+            profile.ui.icon_path = existing.ui.icon_path
 
         self.save(profile)
         return profile

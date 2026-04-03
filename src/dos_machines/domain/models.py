@@ -101,6 +101,7 @@ class SchemaOption:
     value_type: str
     description: str
     help_text: str
+    comment_lines: list[str] = field(default_factory=list)
     choices: list[str] = field(default_factory=list)
     choice_help: dict[str, str] = field(default_factory=dict)
     runtime_dependent: bool = False
@@ -117,6 +118,7 @@ class SchemaOption:
             value_type=payload["value_type"],
             description=payload.get("description", ""),
             help_text=payload.get("help_text", ""),
+            comment_lines=list(payload.get("comment_lines", [])),
             choices=list(payload.get("choices", [])),
             choice_help=dict(payload.get("choice_help", {})),
             runtime_dependent=payload.get("runtime_dependent", False),
@@ -282,6 +284,7 @@ class MachineProfile:
     game: GameTargets
     ui: UiState = field(default_factory=UiState)
     option_states: dict[str, dict[str, OptionState]] = field(default_factory=dict)
+    autoexec_text: str = ""
     raw_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
     provenance: Provenance = field(default_factory=Provenance)
 
@@ -296,6 +299,7 @@ class MachineProfile:
                 section: {name: state.to_json() for name, state in options.items()}
                 for section, options in self.option_states.items()
             },
+            "autoexec_text": self.autoexec_text,
             "raw_overrides": self.raw_overrides,
             "provenance": self.provenance.to_json(),
         }
@@ -324,6 +328,7 @@ class MachineProfile:
             game=GameTargets.from_json(payload["game"]),
             ui=UiState.from_json(payload.get("ui", {})),
             option_states=option_states,
+            autoexec_text=payload.get("autoexec_text", ""),
             raw_overrides=payload.get("raw_overrides", {}),
             provenance=Provenance.from_json(payload.get("provenance", {})),
         )
@@ -333,23 +338,43 @@ class MachineProfile:
 
 
 @dataclass(slots=True)
-class GraphicsPreset:
+class SectionPreset:
     preset_id: str
     title: str
+    section_name: str
     sections: dict[str, dict[str, str]]
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_json(cls, payload: dict[str, Any]) -> "GraphicsPreset":
+    def from_json(cls, payload: dict[str, Any]) -> "SectionPreset":
         return cls(
             preset_id=payload["preset_id"],
             title=payload["title"],
+            section_name=payload["section_name"],
             sections={
                 section: {name: str(value) for name, value in options.items()}
                 for section, options in payload.get("sections", {}).items()
             },
+        )
+
+
+@dataclass(slots=True)
+class MachinePreset:
+    preset_id: str
+    title: str
+    section_preset_ids: list[str]
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> "MachinePreset":
+        return cls(
+            preset_id=payload["preset_id"],
+            title=payload["title"],
+            section_preset_ids=list(payload.get("section_preset_ids", [])),
         )
 
 

@@ -147,7 +147,15 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _open_context_menu(self, point) -> None:
+        item = self._view.itemAt(point)
+        path = Path(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
         menu = QMenu(self)
+        if path is not None and path.suffix == ".desktop":
+            launch_action = menu.addAction("Launch")
+            launch_action.triggered.connect(lambda: self._activate_item(item))
+            configure_action = menu.addAction("Configure Machine")
+            configure_action.triggered.connect(lambda: self._configure_launcher(path))
+            menu.addSeparator()
         add_machine = menu.addAction("Add New Machine")
         add_machine.triggered.connect(self._add_machine)
         new_folder = menu.addAction("New Folder")
@@ -176,3 +184,31 @@ class MainWindow(QMainWindow):
             self._launcher_service.launch_launcher(path)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Launch Failed", str(exc))
+
+    def _configure_launcher(self, launcher_path: Path) -> None:
+        entry = self._workspace_service.read_launcher_entry(launcher_path)
+        if entry.profile_path is None or not entry.profile_path.exists():
+            QMessageBox.warning(self, "Broken Machine", f"Missing profile: {entry.profile_path}")
+            return
+        try:
+            profile = self._profile_service.load(entry.profile_path)
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Load Failed", str(exc))
+            return
+        dialog = CreateMachineDialog(
+            launcher_path.parent,
+            self._engine_registry,
+            self._preset_service,
+            profile=profile,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        request = dialog.build_request()
+        try:
+            updated_profile = self._profile_service.create(request)
+            self._launcher_service.create_launcher(updated_profile, launcher_path.parent)
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Save Failed", str(exc))
+            return
+        self._refresh()
