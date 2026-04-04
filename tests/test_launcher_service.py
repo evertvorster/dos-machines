@@ -92,3 +92,16 @@ def test_sync_launcher_replaces_old_file_when_title_changes(tmp_path: Path) -> N
     assert new_launcher.exists()
     assert not old_launcher.exists()
     assert "Name=New Name" in new_launcher.read_text(encoding="utf-8")
+
+
+def test_launcher_uses_dosbox_x_config_name_for_dosbox_x_engines(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    service = LauncherService()
+
+    profile = _profile(tmp_path, "DOSBox X Game")
+    profile.engine.binary_path = Path("/usr/bin/dosbox-x")
+
+    launcher_path = service.create_launcher(profile, workspace_dir)
+
+    assert '"/usr/bin/dosbox-x" -conf "' in launcher_path.read_text(encoding="utf-8")
+    assert "dosbox-x.conf" in launcher_path.read_text(encoding="utf-8")

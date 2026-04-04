@@ -6,6 +6,15 @@ from pathlib import Path
 import json
 import subprocess
 
+from dos_machines.application.engine_support import (
+    ENGINE_FAMILY_DOSBOX_X,
+    bundled_default_config_path,
+    detect_engine_family_from_name,
+    detect_engine_version,
+    display_name_for_engine,
+    dosbox_x_glshader_dir,
+    engine_id_prefix,
+)
 from dos_machines.application.schema_parser import ConfigSchemaParser
 from dos_machines.domain.models import AppPaths, EngineCapabilities, EngineRef, EngineSchema
 
@@ -29,15 +38,16 @@ class EngineRegistry:
         if not resolved.exists():
             raise FileNotFoundError(f"Engine binary does not exist: {resolved}")
 
-        engine_id = self._engine_id_for_path(resolved)
+        version = detect_engine_version(resolved)
+        engine_id = self._engine_id_for_path(resolved, version)
         engine_root = self._app_paths.engines_root / engine_id
         engine_root.mkdir(parents=True, exist_ok=True)
 
         ref = EngineRef(
             engine_id=engine_id,
             binary_path=resolved,
-            display_name="DOSBox Staging",
-            version=self._detect_version(resolved),
+            display_name=display_name_for_engine(resolved, version),
+            version=version,
             probe_status="cached",
             capabilities=self._detect_capabilities(resolved),
         )
@@ -76,24 +86,9 @@ class EngineRegistry:
         payload = json.loads(schema_path.read_text(encoding="utf-8"))
         return EngineSchema.from_json(payload)
 
-    def _engine_id_for_path(self, binary_path: Path) -> str:
+    def _engine_id_for_path(self, binary_path: Path, version: str | None = None) -> str:
         digest = sha1(str(binary_path).encode("utf-8")).hexdigest()[:12]
-        return f"staging-{digest}"
-
-    def _detect_version(self, binary_path: Path) -> str | None:
-        try:
-            completed = subprocess.run(
-                [str(binary_path), "--version"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-
-        output = (completed.stdout or completed.stderr).strip().splitlines()
-        return output[0].strip() if output else None
+        return f"{engine_id_prefix(binary_path, version)}-{digest}"
 
     def _detect_capabilities(self, binary_path: Path) -> EngineCapabilities:
         glshaders = self._list_glshaders(binary_path)
@@ -105,6 +100,15 @@ class EngineRegistry:
         )
 
     def _list_glshaders(self, binary_path: Path) -> list[str]:
+        if detect_engine_family_from_name(binary_path) == ENGINE_FAMILY_DOSBOX_X:
+            shader_dir = dosbox_x_glshader_dir(binary_path)
+            if shader_dir is None:
+                return []
+            return sorted(
+                path.stem
+                for path in shader_dir.glob("*.glsl")
+                if path.is_file()
+            )
         try:
             completed = subprocess.run(
                 [str(binary_path), "--list-glshaders"],
@@ -119,7 +123,7 @@ class EngineRegistry:
         return [line for line in lines if not line.startswith("--")]
 
     def _load_default_config_text(self, binary_path: Path) -> str:
-        bundled = Path(__file__).resolve().parents[3] / "examples" / "dosbox-staging.conf"
+        bundled = bundled_default_config_path(binary_path)
         if bundled.exists():
             return bundled.read_text(encoding="utf-8")
-        return "# No bundled DOSBox Staging config sample found.\n"
+        return f"# No bundled config sample found for {display_name_for_engine(binary_path)}.\n"

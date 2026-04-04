@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.import_service import ImportAnalysis, ImportIssue, ImportService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
 from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState, SchemaOption, SchemaSection
@@ -143,6 +144,7 @@ class SectionEditorDialog(QDialog):
         section: SchemaSection,
         option_states: dict[str, OptionState],
         preset_service: PresetService,
+        issues: list[ImportIssue] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -151,6 +153,7 @@ class SectionEditorDialog(QDialog):
         self._section = section
         self._option_states = option_states
         self._preset_service = preset_service
+        self._issues = issues or []
         self._field_widgets: dict[str, QWidget] = {}
 
         self._scroll = QScrollArea()
@@ -188,6 +191,13 @@ class SectionEditorDialog(QDialog):
                 widget.deleteLater()
         self._field_widgets.clear()
 
+        section_only_issues = [issue for issue in self._issues if issue.option_name is None]
+        if section_only_issues:
+            warning = QLabel("\n".join(issue.message for issue in section_only_issues))
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color: #a16207;")
+            self._content_layout.addWidget(warning)
+
         for option in self._section.options:
             self._content_layout.addWidget(self._build_option_card(option))
         self._content_layout.addStretch(1)
@@ -197,7 +207,14 @@ class SectionEditorDialog(QDialog):
         box = QGroupBox(option.name)
         layout = QVBoxLayout(box)
 
-        editor = self._build_editor(option, state)
+        option_issues = [issue for issue in self._issues if issue.option_name == option.name]
+        if option_issues:
+            warning = QLabel("\n".join(issue.message for issue in option_issues))
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color: #a16207;")
+            layout.addWidget(warning)
+
+        editor = self._build_editor(option, state, option_issues)
         self._field_widgets[option.name] = editor
         layout.addWidget(editor)
 
@@ -211,20 +228,22 @@ class SectionEditorDialog(QDialog):
 
         return box
 
-    def _build_editor(self, option: SchemaOption, state: OptionState) -> QWidget:
+    def _build_editor(self, option: SchemaOption, state: OptionState, option_issues: list[ImportIssue]) -> QWidget:
+        has_invalid_issue = bool(option_issues)
         if option.value_type == "boolean":
             editor = NoWheelComboBox()
             editor.addItems(["true", "false"])
-            editor.setCurrentText(state.value.lower())
+            current_value = state.value.lower() if not has_invalid_issue else option.default_value.lower()
+            editor.setCurrentText(current_value)
             editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
             return editor
         if option.value_type in {"enum", "dynamic"} and option.choices:
             editor = NoWheelComboBox()
             editor.addItems(option.choices)
             editor.setEditable(option.value_type == "dynamic")
-            if state.value not in option.choices:
+            if state.value not in option.choices and not has_invalid_issue:
                 editor.addItem(state.value)
-            editor.setCurrentText(state.value)
+            editor.setCurrentText(state.value if not has_invalid_issue else option.default_value)
             editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
             return editor
         editor = QLineEdit(state.value)
@@ -364,25 +383,34 @@ class CreateMachineDialog(QDialog):
         engine_registry: EngineRegistry,
         preset_service: PresetService,
         profile: MachineProfile | None = None,
+        import_service: ImportService | None = None,
+        import_analysis: ImportAnalysis | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Configure Machine" if profile is not None else "Add New Machine")
+        self.setWindowTitle("Configure Imported Machine" if import_analysis is not None else "Configure Machine" if profile is not None else "Add New Machine")
         self.resize(980, 760)
         self._workspace_dir = workspace_dir
         self._engine_registry = engine_registry
         self._preset_service = preset_service
+        self._import_service = import_service
+        self._import_analysis = import_analysis
         self._renderer = ConfigRenderer()
         self._profile = profile
         self._schema: EngineSchema | None = None
         self._option_states: dict[str, dict[str, OptionState]] = {}
         self._section_buttons: dict[str, QPushButton] = {}
         self._autoexec_text = profile.autoexec_text if profile is not None else ""
+        self._import_issues: list[ImportIssue] = list(import_analysis.issues) if import_analysis is not None else []
+        self._raw_import_text = import_analysis.raw_text if import_analysis is not None else ""
+        self._last_reanalysed_raw_text = self._raw_import_text
+        self._raw_import_edit = QTextEdit()
+        self._raw_import_edit.setPlainText(self._raw_import_text)
 
-        self.title_edit = QLineEdit(profile.identity.title if profile else "")
-        self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else "")
-        self.executable_edit = QLineEdit(profile.game.executable if profile else "")
-        self.engine_binary_edit = QLineEdit(str(profile.engine.binary_path) if profile else "/usr/bin/dosbox")
+        self.title_edit = QLineEdit(profile.identity.title if profile else import_analysis.title if import_analysis else "")
+        self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else str(import_analysis.game_dir) if import_analysis else "")
+        self.executable_edit = QLineEdit(profile.game.executable if profile else import_analysis.executable if import_analysis else "")
+        self.engine_binary_edit = QLineEdit(str(profile.engine.binary_path) if profile else str(import_analysis.engine_binary) if import_analysis else "/usr/bin/dosbox")
         self.setup_executable_edit = QLineEdit(profile.game.setup_executable or "" if profile else "")
 
         self._load_engine_button = QPushButton("Load Engine Schema")
@@ -398,6 +426,8 @@ class CreateMachineDialog(QDialog):
         self._tabs.addTab(self._build_metadata_tab(), "Machine")
         self._tabs.addTab(self._build_sections_tab(), "Sections")
         self._tabs.addTab(self._build_preview_tab(), "Config Preview")
+        if import_analysis is not None:
+            self._tabs.addTab(self._build_raw_import_tab(), "Imported Raw Config")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._validate_before_accept)
@@ -410,9 +440,13 @@ class CreateMachineDialog(QDialog):
 
         if profile is not None:
             self._load_schema_from_profile()
+        elif import_analysis is not None:
+            self._load_schema_from_import()
         self._sync_buttons()
 
     def build_request(self) -> CreateProfileRequest:
+        if self._import_analysis is not None and self._import_service is not None:
+            self._reanalyse_raw_import()
         existing_profile_path = None
         notes = ""
         if self._profile is not None:
@@ -428,6 +462,8 @@ class CreateMachineDialog(QDialog):
             notes=notes,
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
+            raw_overrides=self._import_analysis.raw_overrides if self._import_analysis is not None else None,
+            import_source_path=self._import_analysis.config_path if self._import_analysis is not None else None,
             existing_profile_path=existing_profile_path,
         )
 
@@ -453,6 +489,11 @@ class CreateMachineDialog(QDialog):
         toolbar.addWidget(self._save_machine_preset_button)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
+        self._sections_warning_label = QLabel()
+        self._sections_warning_label.setWordWrap(True)
+        self._sections_warning_label.setStyleSheet("color: #a16207;")
+        self._sections_warning_label.hide()
+        layout.addWidget(self._sections_warning_label)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -468,6 +509,13 @@ class CreateMachineDialog(QDialog):
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel("Generated config preview"))
         layout.addWidget(self._config_preview)
+        return tab
+
+    def _build_raw_import_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel("Imported raw config"))
+        layout.addWidget(self._raw_import_edit)
         return tab
 
     def _with_browse(self, line_edit: QLineEdit, callback) -> QHBoxLayout:
@@ -527,7 +575,27 @@ class CreateMachineDialog(QDialog):
             }
             for section in self._schema.sections
         }
-        self._autoexec_text = self._profile.autoexec_text or self._renderer.default_autoexec_text(self._profile.game)
+        self._autoexec_text = self._profile.autoexec_text or self._renderer.default_autoexec_text(
+            self._profile.game,
+            self._profile.engine.binary_path,
+        )
+        self._rebuild_sections_overview()
+
+    def _load_schema_from_import(self) -> None:
+        assert self._import_analysis is not None
+        cache = self._engine_registry.register(self._import_analysis.engine_binary)
+        self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
+        self._option_states = {
+            section.name: {
+                option.name: self._import_analysis.option_states.get(section.name, {}).get(
+                    option.name,
+                    OptionState(value=option.default_value, checked=False, origin="default"),
+                )
+                for option in section.options
+            }
+            for section in self._schema.sections
+        }
+        self._autoexec_text = self._import_analysis.autoexec_text
         self._rebuild_sections_overview()
 
     def _load_schema(self) -> None:
@@ -563,7 +631,8 @@ class CreateMachineDialog(QDialog):
                     working_dir=game_dir,
                     executable=self.executable_edit.text().strip(),
                     setup_executable=self.setup_executable_edit.text().strip() or None,
-                )
+                ),
+                binary_path,
             )
         self._rebuild_sections_overview()
 
@@ -579,8 +648,22 @@ class CreateMachineDialog(QDialog):
             self._sync_buttons()
             return
 
+        sectionless_issues = [
+            issue.message
+            for issue in self._import_issues
+            if issue.section_name not in {section.name for section in self._schema.sections}
+        ]
+        if sectionless_issues:
+            self._sections_warning_label.setText("\n".join(sectionless_issues))
+            self._sections_warning_label.show()
+        else:
+            self._sections_warning_label.hide()
+
         for section in self._schema.sections:
-            button = QPushButton(section.name)
+            button = QPushButton(self._section_button_text(section.name))
+            if any(issue.section_name == section.name for issue in self._import_issues):
+                button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MessageBoxWarning))
+                button.setStyleSheet("color: #a16207;")
             button.clicked.connect(lambda _=False, name=section.name: self._open_section_dialog(name))
             self._section_buttons[section.name] = button
             self._sections_flow.addWidget(button)
@@ -605,10 +688,12 @@ class CreateMachineDialog(QDialog):
             section=section,
             option_states=self._option_states[section_name],
             preset_service=self._preset_service,
+            issues=[issue for issue in self._import_issues if issue.section_name == section_name],
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        self._refresh_import_issues_for_section(section)
         self._update_preview()
 
     def _sync_buttons(self) -> None:
@@ -712,4 +797,59 @@ class CreateMachineDialog(QDialog):
         if self._schema is None:
             QMessageBox.warning(self, "Schema Not Loaded", "Load the engine schema before saving.")
             return
+        if self._import_analysis is not None and self._import_service is not None:
+            self._reanalyse_raw_import()
+            if self._import_issues:
+                QMessageBox.warning(
+                    self,
+                    "Import Issues",
+                    "Resolve the highlighted import issues or repair the raw config before saving.",
+                )
+                return
         self.accept()
+
+    def _reanalyse_raw_import(self) -> None:
+        assert self._import_analysis is not None
+        assert self._import_service is not None
+        current_raw_text = self._raw_import_edit.toPlainText()
+        if current_raw_text == self._last_reanalysed_raw_text:
+            return
+        latest = self._import_service.analyse_text(current_raw_text, self._import_analysis.config_path)
+        self._import_analysis = latest
+        self._import_issues = list(latest.issues)
+        self._last_reanalysed_raw_text = current_raw_text
+        self._autoexec_text = latest.autoexec_text
+        self._option_states = latest.option_states
+        self.title_edit.setText(latest.title)
+        self.game_dir_edit.setText(str(latest.game_dir))
+        self.executable_edit.setText(latest.executable)
+        self.engine_binary_edit.setText(str(latest.engine_binary))
+        self._rebuild_sections_overview()
+
+    def _section_button_text(self, section_name: str) -> str:
+        issue_count = sum(1 for issue in self._import_issues if issue.section_name == section_name)
+        if issue_count:
+            return f"{section_name} ({issue_count})"
+        return section_name
+
+    def _refresh_import_issues_for_section(self, section: SchemaSection) -> None:
+        if self._schema is None:
+            return
+        remaining: list[ImportIssue] = []
+        for issue in self._import_issues:
+            if issue.section_name != section.name or issue.option_name is None:
+                remaining.append(issue)
+                continue
+            option = next((item for item in section.options if item.name == issue.option_name), None)
+            state = self._option_states.get(section.name, {}).get(issue.option_name)
+            if option is None or state is None:
+                remaining.append(issue)
+                continue
+            if option.value_type == "boolean" and state.value.lower() not in {"true", "false", "1", "0"}:
+                remaining.append(issue)
+                continue
+            if option.choices and state.value not in option.choices:
+                remaining.append(issue)
+                continue
+        self._import_issues = remaining
+        self._rebuild_sections_overview()

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from dos_machines.application.engine_support import detect_engine_family_from_name, ENGINE_FAMILY_DOSBOX_X
 from dos_machines.domain.models import EngineSchema, GameTargets, MachineProfile
 
 
@@ -55,15 +58,26 @@ class ConfigRenderer:
     def render_autoexec_text(self, profile: MachineProfile) -> str:
         if profile.autoexec_text.strip():
             return profile.autoexec_text.strip()
-        return self.default_autoexec_text(profile.game)
+        return self.default_autoexec_text(profile.game, profile.engine.binary_path)
 
-    def default_autoexec_text(self, game: GameTargets) -> str:
-        lines = [
+    def default_autoexec_text(self, game: GameTargets, engine_binary: Path | None = None) -> str:
+        lines = self._default_autoexec_prefix(game, engine_binary)
+        if game.executable:
+            lines.append(game.executable)
+        return "\n".join(lines)
+
+    def _default_autoexec_prefix(self, game: GameTargets, engine_binary: Path | None) -> list[str]:
+        if engine_binary is not None and detect_engine_family_from_name(engine_binary) == ENGINE_FAMILY_DOSBOX_X:
+            return [
+                "# Lines in this section are run at startup.",
+                'mount c ".."',
+                "c:",
+                "cd .dosmachines",
+                "cd ..",
+            ]
+        return [
             "# Lines in this section are run at startup.",
             f"mount c \"{game.game_dir}\"",
             "c:",
             self._render_cd_from_game(game),
         ]
-        if game.executable:
-            lines.append(game.executable)
-        return "\n".join(lines)

@@ -227,6 +227,7 @@ class MainWindow(QMainWindow):
             self._current_dir,
             self._engine_registry,
             self._preset_service,
+            import_service=self._import_service,
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -253,7 +254,22 @@ class MainWindow(QMainWindow):
         imported_titles: list[str] = []
         for config_path in config_paths:
             try:
-                profile = self._import_service.import_config(config_path, self._current_dir)
+                analysis = self._import_service.analyse_config(config_path)
+                if analysis.has_issues:
+                    dialog = CreateMachineDialog(
+                        self._current_dir,
+                        self._engine_registry,
+                        self._preset_service,
+                        import_service=self._import_service,
+                        import_analysis=analysis,
+                        parent=self,
+                    )
+                    if dialog.exec() != QDialog.DialogCode.Accepted:
+                        return True
+                    request = dialog.build_request()
+                    profile = self._profile_service.create(request)
+                else:
+                    profile = self._import_service.import_config(config_path, self._current_dir)
                 self._launcher_service.create_launcher(profile, self._current_dir)
                 imported_titles.append(profile.identity.title)
             except FileExistsError:
@@ -347,6 +363,7 @@ class MainWindow(QMainWindow):
             self._engine_registry,
             self._preset_service,
             profile=profile,
+            import_service=self._import_service,
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:

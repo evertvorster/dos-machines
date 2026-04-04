@@ -97,3 +97,29 @@ def test_import_managed_config_uses_parent_game_dir_and_keeps_provenance(tmp_pat
     assert profile.autoexec_text == ""
     assert reloaded.provenance.import_source_path == config_path.resolve()
     assert reloaded.game.executable == "DOOM.EXE"
+
+
+def test_analyse_config_reports_unknown_and_invalid_settings(tmp_path: Path, monkeypatch) -> None:
+    service, _, binary = _import_service(tmp_path)
+    monkeypatch.setattr(
+        "dos_machines.application.import_service.shutil.which",
+        lambda name: str(binary) if name in {"dosbox", "dosbox-staging", "dosbox-x"} else None,
+    )
+    config_path = tmp_path / "weird" / "dosbox.conf"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[sdl]\n"
+        "fullscreen = maybe\n"
+        "mystery = true\n"
+        "\n"
+        "[alien]\n"
+        "foo = bar\n",
+        encoding="utf-8",
+    )
+
+    analysis = service.analyse_config(config_path)
+
+    assert analysis.has_issues is True
+    assert any(issue.option_name == "fullscreen" for issue in analysis.issues)
+    assert any(issue.option_name == "mystery" for issue in analysis.issues)
+    assert any(issue.section_name == "alien" and issue.option_name is None for issue in analysis.issues)

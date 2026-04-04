@@ -7,7 +7,7 @@ import shutil
 
 from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
-from dos_machines.domain.models import MachineProfile, OptionState
+from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState
 
 
 _SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
@@ -25,6 +25,20 @@ class ImportAnalysis:
     option_states: dict[str, dict[str, OptionState]]
     autoexec_text: str
     raw_overrides: dict[str, dict[str, str]]
+    issues: list["ImportIssue"]
+    raw_text: str
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.issues)
+
+
+@dataclass(slots=True)
+class ImportIssue:
+    section_name: str
+    message: str
+    option_name: str | None = None
+    imported_value: str | None = None
 
 
 class ImportService:
@@ -37,6 +51,8 @@ class ImportService:
 
     def import_config(self, config_path: Path, workspace_dir: Path) -> MachineProfile:
         analysis = self.analyse_config(config_path)
+        if analysis.has_issues:
+            raise ValueError("Import has unresolved issues and must be reviewed in the editor.")
         request = CreateProfileRequest(
             title=analysis.title,
             game_dir=analysis.game_dir,
@@ -56,20 +72,33 @@ class ImportService:
             raise FileNotFoundError(f"Config file does not exist: {resolved}")
         if not self.can_import(resolved):
             raise ValueError(f"Unsupported config file: {resolved.name}")
+        return self.analyse_text(resolved.read_text(encoding="utf-8"), resolved)
 
+    def analyse_text(self, text: str, config_path: Path) -> ImportAnalysis:
+        resolved = config_path.expanduser().resolve()
+        if not self.can_import(resolved):
+            raise ValueError(f"Unsupported config file: {resolved.name}")
         engine_binary = self._detect_engine_binary(resolved)
         cache = self._engine_registry.register(engine_binary)
         schema = self._engine_registry.load_schema(cache.ref.engine_id)
+        return self._analyse_parsed_text(text, resolved, engine_binary, schema)
 
-        text = resolved.read_text(encoding="utf-8")
+    def _analyse_parsed_text(
+        self,
+        text: str,
+        config_path: Path,
+        engine_binary: Path,
+        schema: EngineSchema,
+    ) -> ImportAnalysis:
         parsed_sections, autoexec_lines = self._parse_config_text(text)
-        is_managed = self._is_managed_config(resolved, text, autoexec_lines)
-        game_dir = self._infer_game_dir(resolved, is_managed)
+        is_managed = self._is_managed_config(config_path, text, autoexec_lines)
+        game_dir = self._infer_game_dir(config_path, is_managed)
         executable = self._detect_executable(autoexec_lines)
-        title = game_dir.name or resolved.stem
+        title = game_dir.name or config_path.stem
 
         option_states: dict[str, dict[str, OptionState]] = {}
         raw_overrides: dict[str, dict[str, str]] = {}
+        issues: list[ImportIssue] = []
         schema_sections = {section.name: section for section in schema.sections}
         for section in schema.sections:
             if section.name == "autoexec":
@@ -78,11 +107,15 @@ class ImportService:
             option_states[section.name] = {}
             for option in section.options:
                 if option.name in imported_values:
+                    imported_value = imported_values[option.name]
                     option_states[section.name][option.name] = OptionState(
-                        value=imported_values[option.name],
+                        value=imported_value,
                         checked=True,
                         origin="imported",
                     )
+                    issue = self._validate_option_value(section.name, option, imported_value)
+                    if issue is not None:
+                        issues.append(issue)
                 else:
                     option_states[section.name][option.name] = OptionState(
                         value=option.default_value,
@@ -96,15 +129,30 @@ class ImportService:
             schema_section = schema_sections.get(section_name)
             if schema_section is None:
                 raw_overrides[section_name] = dict(values)
+                issues.append(
+                    ImportIssue(
+                        section_name=section_name,
+                        message=f"Unknown section [{section_name}] is not supported by this engine schema.",
+                    )
+                )
                 continue
             schema_option_names = {option.name for option in schema_section.options}
             extras = {key: value for key, value in values.items() if key not in schema_option_names}
             if extras:
                 raw_overrides[section_name] = extras
+                for key, value in extras.items():
+                    issues.append(
+                        ImportIssue(
+                            section_name=section_name,
+                            option_name=key,
+                            imported_value=value,
+                            message=f"Unknown setting '{key}' is not supported by this engine schema.",
+                        )
+                    )
 
         autoexec_text = "" if is_managed else "\n".join(autoexec_lines).strip()
         return ImportAnalysis(
-            config_path=resolved,
+            config_path=config_path,
             is_managed_config=is_managed,
             title=title,
             game_dir=game_dir,
@@ -113,6 +161,8 @@ class ImportService:
             option_states=option_states,
             autoexec_text=autoexec_text,
             raw_overrides=raw_overrides,
+            issues=issues,
+            raw_text=text,
         )
 
     def _detect_engine_binary(self, config_path: Path) -> Path:
@@ -194,3 +244,21 @@ class ImportService:
                 continue
             return line
         return ""
+
+    def _validate_option_value(self, section_name, option, imported_value: str) -> ImportIssue | None:
+        lowered = imported_value.lower()
+        if option.value_type == "boolean" and lowered not in {"true", "false", "1", "0"}:
+            return ImportIssue(
+                section_name=section_name,
+                option_name=option.name,
+                imported_value=imported_value,
+                message=f"Unsupported boolean value '{imported_value}' for '{option.name}'.",
+            )
+        if option.choices and imported_value not in option.choices:
+            return ImportIssue(
+                section_name=section_name,
+                option_name=option.name,
+                imported_value=imported_value,
+                message=f"Unsupported value '{imported_value}' for '{option.name}'.",
+            )
+        return None

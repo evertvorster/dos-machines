@@ -8,6 +8,7 @@ import shutil
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.engine_support import managed_config_filename
 from dos_machines.domain.models import AppPaths, GameTargets, MachineProfile, OptionState, Provenance, UiState
 
 
@@ -48,7 +49,12 @@ class ProfileService:
         return self.managed_dir(game_dir) / "profile.json"
 
     def config_path_for_game(self, game_dir: Path) -> Path:
-        return self.managed_dir(game_dir) / "dosbox.conf"
+        managed_dir = self.managed_dir(game_dir)
+        for candidate in ("dosbox-x.conf", "dosbox.conf"):
+            path = managed_dir / candidate
+            if path.exists():
+                return path
+        return managed_dir / "dosbox.conf"
 
     def existing_profile(self, game_dir: Path) -> MachineProfile | None:
         profile_path = self.profile_path_for_game(game_dir)
@@ -90,7 +96,7 @@ class ProfileService:
                 request.autoexec_text
                 if request.autoexec_text is not None
                 else existing.autoexec_text if existing is not None and existing.autoexec_text
-                else self._config_renderer.default_autoexec_text(game_targets)
+                else self._config_renderer.default_autoexec_text(game_targets, engine_cache.ref.binary_path)
             ),
             raw_overrides=request.raw_overrides or (existing.raw_overrides if existing is not None else {}),
         )
@@ -108,9 +114,13 @@ class ProfileService:
         managed_dir = self.managed_dir(profile.game.game_dir)
         managed_dir.mkdir(parents=True, exist_ok=True)
         profile_path = managed_dir / "profile.json"
-        config_path = managed_dir / "dosbox.conf"
+        config_path = managed_dir / managed_config_filename(profile.engine.binary_path)
         schema = self._engine_registry.load_schema(profile.engine.engine_id)
         profile_path.write_text(profile.dumps(), encoding="utf-8")
+        for candidate in ("dosbox.conf", "dosbox-x.conf"):
+            candidate_path = managed_dir / candidate
+            if candidate_path != config_path and candidate_path.exists():
+                candidate_path.unlink()
         config_path.write_text(self._config_renderer.render(profile, schema), encoding="utf-8")
 
     def load(self, profile_path: Path) -> MachineProfile:
