@@ -25,6 +25,8 @@ class CreateProfileRequest:
     icon_source: Path | None = None
     option_states: dict[str, dict[str, OptionState]] | None = None
     autoexec_text: str | None = None
+    raw_overrides: dict[str, dict[str, str]] | None = None
+    import_source_path: Path | None = None
     existing_profile_path: Path | None = None
 
 
@@ -68,6 +70,8 @@ class ProfileService:
         working_dir = game_dir
         ui_state = existing.ui if existing is not None else UiState()
         provenance = existing.provenance if existing is not None else Provenance()
+        if request.import_source_path is not None:
+            provenance.import_source_path = request.import_source_path.expanduser().resolve()
         game_targets = GameTargets(
             game_dir=game_dir,
             working_dir=working_dir,
@@ -88,6 +92,7 @@ class ProfileService:
                 else existing.autoexec_text if existing is not None and existing.autoexec_text
                 else self._config_renderer.default_autoexec_text(game_targets)
             ),
+            raw_overrides=request.raw_overrides or (existing.raw_overrides if existing is not None else {}),
         )
         if request.icon_source is not None:
             icon_target = managed_dir / "icon.png"

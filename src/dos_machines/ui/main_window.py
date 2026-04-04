@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.import_service import ImportService
 from dos_machines.application.launcher_service import LauncherService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
@@ -27,6 +28,13 @@ from dos_machines.ui.create_machine_dialog import CreateMachineDialog
 
 
 class WorkspaceFileView(QListView):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._import_handler = None
+
+    def set_import_handler(self, handler) -> None:
+        self._import_handler = handler
+
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist"):
             event.setDropAction(Qt.DropAction.MoveAction)
@@ -42,6 +50,15 @@ class WorkspaceFileView(QListView):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        if event.mimeData().hasUrls() and self._import_handler is not None:
+            import_paths = [
+                Path(url.toLocalFile())
+                for url in event.mimeData().urls()
+                if url.isLocalFile()
+            ]
+            if import_paths and self._import_handler(import_paths):
+                event.acceptProposedAction()
+                return
         target_index = self.indexAt(event.position().toPoint())
         if not target_index.isValid():
             super().dropEvent(event)
@@ -84,6 +101,7 @@ class MainWindow(QMainWindow):
         settings_service: SettingsService,
         workspace_service: WorkspaceService,
         profile_service: ProfileService,
+        import_service: ImportService,
         launcher_service: LauncherService,
         engine_registry: EngineRegistry,
         preset_service: PresetService,
@@ -92,6 +110,7 @@ class MainWindow(QMainWindow):
         self._settings_service = settings_service
         self._workspace_service = workspace_service
         self._profile_service = profile_service
+        self._import_service = import_service
         self._launcher_service = launcher_service
         self._engine_registry = engine_registry
         self._preset_service = preset_service
@@ -129,6 +148,7 @@ class MainWindow(QMainWindow):
         )
         self._view.setModel(self._model)
         self._view.setRootIndex(self._model.index(str(self._current_dir)))
+        self._view.set_import_handler(self._import_paths)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
         self._view.activated.connect(self._activate_index)
@@ -225,6 +245,35 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Create Machine Failed", str(exc))
         self._refresh()
+
+    def _import_paths(self, paths: list[Path]) -> bool:
+        config_paths = [path for path in paths if self._import_service.can_import(path)]
+        if not config_paths:
+            return False
+        imported_titles: list[str] = []
+        for config_path in config_paths:
+            try:
+                profile = self._import_service.import_config(config_path, self._current_dir)
+                self._launcher_service.create_launcher(profile, self._current_dir)
+                imported_titles.append(profile.identity.title)
+            except FileExistsError:
+                QMessageBox.warning(
+                    self,
+                    "Import Failed",
+                    f"A machine for '{config_path.parent.name}' already exists.",
+                )
+                return True
+            except Exception as exc:  # pragma: no cover - UI safety net
+                QMessageBox.critical(self, "Import Failed", str(exc))
+                return True
+        self._refresh()
+        if imported_titles:
+            QMessageBox.information(
+                self,
+                "Import Complete",
+                f"Imported {len(imported_titles)} config file(s) into '{self._current_dir.name or self._current_dir}'.",
+            )
+        return True
 
     def _open_context_menu(self, point) -> None:
         index = self._view.indexAt(point)

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.import_service import ImportService
 from dos_machines.application.launcher_service import LauncherService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import ProfileService
@@ -24,11 +25,13 @@ def build_main_window() -> MainWindow:
     preset_service = PresetService(settings_service.app_paths)
     config_renderer = ConfigRenderer()
     profile_service = ProfileService(settings_service.app_paths, engine_registry, config_renderer)
+    import_service = ImportService(engine_registry, profile_service)
     launcher_service = LauncherService()
     return MainWindow(
         settings_service=settings_service,
         workspace_service=workspace_service,
         profile_service=profile_service,
+        import_service=import_service,
         launcher_service=launcher_service,
         engine_registry=engine_registry,
         preset_service=preset_service,
