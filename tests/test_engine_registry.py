@@ -21,21 +21,6 @@ def _fake_binary(path: Path, version_output: str) -> Path:
     return path
 
 
-def test_register_dosbox_x_uses_dosbox_x_defaults(tmp_path: Path) -> None:
-    settings_service = SettingsService(config_root=tmp_path / "config")
-    settings_service.load()
-    engine_registry = EngineRegistry(settings_service.app_paths)
-    binary = _fake_binary(tmp_path / "bin" / "dosbox-x", "DOSBox-X version 2026.03.29 SDL2")
-
-    cache = engine_registry.register(binary)
-    schema = engine_registry.load_schema(cache.ref.engine_id)
-
-    assert cache.ref.display_name == "DOSBox-X"
-    assert cache.ref.engine_id.startswith("dosbox-x-")
-    assert cache.default_conf_path.read_text(encoding="utf-8").startswith("# This is the configuration file for DOSBox-X")
-    assert any(section.name == "log" for section in schema.sections)
-
-
 def test_register_dosbox_staging_keeps_cli_shader_probe(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
@@ -45,4 +30,6 @@ def test_register_dosbox_staging_keeps_cli_shader_probe(tmp_path: Path) -> None:
     cache = engine_registry.register(binary)
 
     assert cache.ref.display_name == "DOSBox Staging"
+    assert cache.ref.engine_id.startswith("staging-")
     assert cache.ref.capabilities.glshaders == ["crt-auto", "sharp"]
+    assert cache.default_conf_path.read_text(encoding="utf-8").startswith("# This is the configuration file for DOSBox Staging")

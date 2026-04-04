@@ -7,12 +7,9 @@ import json
 import subprocess
 
 from dos_machines.application.engine_support import (
-    ENGINE_FAMILY_DOSBOX_X,
     bundled_default_config_path,
-    detect_engine_family_from_name,
     detect_engine_version,
     display_name_for_engine,
-    dosbox_x_glshader_dir,
     engine_id_prefix,
 )
 from dos_machines.application.schema_parser import ConfigSchemaParser
@@ -46,7 +43,7 @@ class EngineRegistry:
         ref = EngineRef(
             engine_id=engine_id,
             binary_path=resolved,
-            display_name=display_name_for_engine(resolved, version),
+            display_name=display_name_for_engine(version),
             version=version,
             probe_status="cached",
             capabilities=self._detect_capabilities(resolved),
@@ -88,7 +85,7 @@ class EngineRegistry:
 
     def _engine_id_for_path(self, binary_path: Path, version: str | None = None) -> str:
         digest = sha1(str(binary_path).encode("utf-8")).hexdigest()[:12]
-        return f"{engine_id_prefix(binary_path, version)}-{digest}"
+        return f"{engine_id_prefix(version)}-{digest}"
 
     def _detect_capabilities(self, binary_path: Path) -> EngineCapabilities:
         glshaders = self._list_glshaders(binary_path)
@@ -100,15 +97,6 @@ class EngineRegistry:
         )
 
     def _list_glshaders(self, binary_path: Path) -> list[str]:
-        if detect_engine_family_from_name(binary_path) == ENGINE_FAMILY_DOSBOX_X:
-            shader_dir = dosbox_x_glshader_dir(binary_path)
-            if shader_dir is None:
-                return []
-            return sorted(
-                path.stem
-                for path in shader_dir.glob("*.glsl")
-                if path.is_file()
-            )
         try:
             completed = subprocess.run(
                 [str(binary_path), "--list-glshaders"],
@@ -123,7 +111,7 @@ class EngineRegistry:
         return [line for line in lines if not line.startswith("--")]
 
     def _load_default_config_text(self, binary_path: Path) -> str:
-        bundled = bundled_default_config_path(binary_path)
+        bundled = bundled_default_config_path()
         if bundled.exists():
             return bundled.read_text(encoding="utf-8")
-        return f"# No bundled config sample found for {display_name_for_engine(binary_path)}.\n"
+        return f"# No bundled config sample found for {display_name_for_engine()}.\n"

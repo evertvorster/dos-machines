@@ -37,7 +37,7 @@ def test_analyse_general_config_preserves_autoexec_and_unknown_sections(tmp_path
     service, _, binary = _import_service(tmp_path)
     monkeypatch.setattr(
         "dos_machines.application.import_service.shutil.which",
-        lambda name: str(binary) if name in {"dosbox", "dosbox-staging", "dosbox-x"} else None,
+        lambda name: str(binary) if name in {"dosbox", "dosbox-staging"} else None,
     )
     config_path = tmp_path / "keen4" / "dosbox.conf"
     config_path.parent.mkdir(parents=True)
@@ -71,7 +71,7 @@ def test_import_managed_config_uses_parent_game_dir_and_keeps_provenance(tmp_pat
     service, profile_service, binary = _import_service(tmp_path)
     monkeypatch.setattr(
         "dos_machines.application.import_service.shutil.which",
-        lambda name: str(binary) if name in {"dosbox", "dosbox-staging", "dosbox-x"} else None,
+        lambda name: str(binary) if name in {"dosbox", "dosbox-staging"} else None,
     )
     config_path = tmp_path / "games" / "doom" / ".dosmachines" / "dosbox.conf"
     config_path.parent.mkdir(parents=True)
@@ -83,8 +83,6 @@ def test_import_managed_config_uses_parent_game_dir_and_keeps_provenance(tmp_pat
         "[autoexec]\n"
         "mount c \"..\"\n"
         "c:\n"
-        "cd .dosmachines\n"
-        "cd ..\n"
         "DOOM.EXE\n",
         encoding="utf-8",
     )
@@ -103,7 +101,7 @@ def test_analyse_config_reports_unknown_and_invalid_settings(tmp_path: Path, mon
     service, _, binary = _import_service(tmp_path)
     monkeypatch.setattr(
         "dos_machines.application.import_service.shutil.which",
-        lambda name: str(binary) if name in {"dosbox", "dosbox-staging", "dosbox-x"} else None,
+        lambda name: str(binary) if name in {"dosbox", "dosbox-staging"} else None,
     )
     config_path = tmp_path / "weird" / "dosbox.conf"
     config_path.parent.mkdir(parents=True)

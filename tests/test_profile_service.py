@@ -220,43 +220,6 @@ def test_delete_profile_keeps_generated_config(tmp_path: Path) -> None:
     assert config_path.exists()
     assert managed_dir.exists()
 
-
-def test_dosbox_x_profile_writes_dosbox_x_conf(tmp_path: Path) -> None:
-    settings_service = SettingsService(config_root=tmp_path / "config")
-    settings_service.load()
-    engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
-    binary = _fake_binary(tmp_path / "bin" / "dosbox-x")
-    cache = engine_registry.register(binary)
-    schema = engine_registry.load_schema(cache.ref.engine_id)
-
-    profile = profile_service.create(
-        CreateProfileRequest(
-            title="DOSBox X Game",
-            game_dir=tmp_path / "xgame",
-            executable="GAME.EXE",
-            engine_binary=binary,
-            workspace_dir=tmp_path / "workspace",
-            option_states={
-                section.name: {
-                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
-                    for option in section.options
-                }
-                for section in schema.sections
-                if section.name != "autoexec"
-            },
-        )
-    )
-
-    managed_dir = profile.game.game_dir / ".dosmachines"
-
-    assert (managed_dir / "dosbox-x.conf").exists()
-    assert not (managed_dir / "dosbox.conf").exists()
-    config_text = (managed_dir / "dosbox-x.conf").read_text(encoding="utf-8")
-    assert 'mount c ".."' in config_text
-    assert "c:" in config_text
-
-
 def test_create_can_overwrite_existing_managed_profile(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()

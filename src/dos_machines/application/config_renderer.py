@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dos_machines.application.engine_support import detect_engine_family_from_name, ENGINE_FAMILY_DOSBOX_X
 from dos_machines.domain.models import EngineSchema, GameTargets, MachineProfile
 
 
@@ -64,12 +63,6 @@ class ConfigRenderer:
         return "\n".join(self._default_autoexec_prefix(game, engine_binary))
 
     def _default_autoexec_prefix(self, game: GameTargets, engine_binary: Path | None) -> list[str]:
-        if engine_binary is not None and detect_engine_family_from_name(engine_binary) == ENGINE_FAMILY_DOSBOX_X:
-            return [
-                "# Lines in this section are run at startup.",
-                'mount c ".."',
-                "c:",
-            ]
         return [
             "# Lines in this section are run at startup.",
             'mount c ".."',

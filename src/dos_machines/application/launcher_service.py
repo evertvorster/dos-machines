@@ -5,7 +5,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from dos_machines.application.engine_support import managed_config_filename
+from dos_machines.application.engine_support import MANAGED_CONFIG_FILENAME
 from dos_machines.domain.models import MachineProfile
 
 
@@ -42,7 +42,7 @@ class LauncherService:
         return written_path
 
     def _write_launcher(self, profile: MachineProfile, launcher_path: Path) -> Path:
-        config_path = profile.game.game_dir / ".dosmachines" / managed_config_filename(profile.engine.binary_path)
+        config_path = profile.game.game_dir / ".dosmachines" / MANAGED_CONFIG_FILENAME
         working_dir = profile.game.game_dir / ".dosmachines"
         icon_path = profile.ui.icon_path
         icon_value = str(icon_path) if icon_path is not None else "applications-games"

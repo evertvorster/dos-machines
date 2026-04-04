@@ -47,7 +47,7 @@ class ImportService:
         self._profile_service = profile_service
 
     def can_import(self, path: Path) -> bool:
-        return path.name.lower() in {"dosbox.conf", "dosbox-x.conf"}
+        return path.name.lower() == "dosbox.conf"
 
     def import_config(self, config_path: Path, workspace_dir: Path) -> MachineProfile:
         analysis = self.analyse_config(config_path)
@@ -166,11 +166,7 @@ class ImportService:
         )
 
     def _detect_engine_binary(self, config_path: Path) -> Path:
-        candidates = ["dosbox-x", "dosbox", "dosbox-staging"] if config_path.name.lower() == "dosbox-x.conf" else [
-            "dosbox",
-            "dosbox-staging",
-            "dosbox-x",
-        ]
+        candidates = ["dosbox", "dosbox-staging"]
         for candidate in candidates:
             resolved = shutil.which(candidate)
             if resolved:

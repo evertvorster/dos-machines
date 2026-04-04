@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from dos_machines.application.engine_registry import EngineRegistry
-from dos_machines.application.engine_support import managed_config_filename
+from dos_machines.application.engine_support import MANAGED_CONFIG_FILENAME
 from dos_machines.application.import_service import ImportService
 from dos_machines.application.launcher_service import LauncherService
 from dos_machines.application.preset_service import PresetService
@@ -479,7 +479,7 @@ class MainWindow(QMainWindow):
 
     def _resolve_new_machine_conflicts(self, request: CreateProfileRequest) -> CreateProfileRequest | None:
         managed_dir = request.game_dir.expanduser().resolve() / ".dosmachines"
-        target_config_path = managed_dir / managed_config_filename(request.engine_binary)
+        target_config_path = managed_dir / MANAGED_CONFIG_FILENAME
         existing_profile_path = managed_dir / "profile.json"
         if not target_config_path.exists() and not existing_profile_path.exists():
             return request
