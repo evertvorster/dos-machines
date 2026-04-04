@@ -47,12 +47,17 @@ class WorkspaceService:
         title = section.get("Name", launcher_path.stem)
         profile_value = section.get("X-DOSMachines-ProfilePath")
         machine_id = section.get("X-DOSMachines-MachineId")
+        icon_value = section.get("Icon")
         profile_path = Path(profile_value) if profile_value else None
+        icon_path = None
+        if icon_value and "/" in icon_value:
+            icon_path = Path(icon_value).expanduser()
         broken = profile_path is not None and not profile_path.exists()
         return WorkspaceEntry(
             launcher_path=launcher_path,
             title=title,
             profile_path=profile_path,
             machine_id=machine_id,
+            icon_path=icon_path,
             broken=broken,
         )

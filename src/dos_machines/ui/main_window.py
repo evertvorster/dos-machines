@@ -671,6 +671,12 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Load Failed", str(exc))
             return
+        if (
+            (profile.ui.icon_path is None or not profile.ui.icon_path.exists())
+            and entry.icon_path is not None
+            and entry.icon_path.exists()
+        ):
+            profile.ui.icon_path = entry.icon_path
         dialog = CreateMachineDialog(
             launcher_path.parent,
             self._settings_service,

@@ -434,7 +434,7 @@ class CreateMachineDialog(QDialog):
         self._option_states: dict[str, dict[str, OptionState]] = {}
         self._section_buttons: dict[str, QPushButton] = {}
         self._autoexec_text = profile.autoexec_text if profile is not None else ""
-        self._icon_source = profile.ui.icon_path if profile is not None else None
+        self._icon_source = None
         self._remove_icon = False
         self._import_issues: list[ImportIssue] = list(import_analysis.issues) if import_analysis is not None else []
         self._raw_import_text = import_analysis.raw_text if import_analysis is not None else ""

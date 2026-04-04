@@ -393,4 +393,5 @@ class WorkspaceEntry:
     title: str
     profile_path: Path | None
     machine_id: str | None
+    icon_path: Path | None = None
     broken: bool = False

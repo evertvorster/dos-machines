@@ -114,3 +114,43 @@ def test_icon_selection_prefers_capture_directory(tmp_path: Path) -> None:
     dialog.game_dir_edit.setText(str(game_dir))
 
     assert dialog._icon_start_dir() == capture_dir
+
+
+def test_existing_profile_does_not_resubmit_current_icon_as_new_source(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    managed_icon = tmp_path / "game" / ".dosmachines" / "image0001.png"
+    managed_icon.parent.mkdir(parents=True)
+    managed_icon.write_text("icon", encoding="utf-8")
+
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Icon Game",
+            game_dir=tmp_path / "game",
+            executable="",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states={
+                section.name: {
+                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    for option in section.options
+                }
+                for section in schema.sections
+                if section.name != "autoexec"
+            },
+        )
+    )
+    profile.ui.icon_path = managed_icon
+
+    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service, profile=profile)
+    request = dialog.build_request()
+
+    assert request.icon_source is None
+    assert request.remove_icon is False
