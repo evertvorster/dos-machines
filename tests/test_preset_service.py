@@ -29,3 +29,16 @@ def test_section_and_machine_presets_round_trip(tmp_path: Path) -> None:
     assert any(item.preset_id == section.preset_id for item in sections)
     assert any(item.preset_id == machine.preset_id for item in machines)
     assert resolved["midi"]["mididevice"] == "mt32"
+
+
+def test_engine_scoped_section_defaults_round_trip(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+
+    preset_service.save_section_default("staging-a", "sdl", {"fullscreen": "true"})
+    preset_service.save_section_default("staging-b", "sdl", {"fullscreen": "false"})
+
+    assert preset_service.load_section_default("staging-a", "sdl") == {"fullscreen": "true"}
+    assert preset_service.load_section_default("staging-b", "sdl") == {"fullscreen": "false"}
+    assert preset_service.load_section_default("missing", "sdl") is None

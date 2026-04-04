@@ -19,6 +19,21 @@ class PresetService:
         payload = self._load_payload()
         return [MachinePreset.from_json(item) for item in payload.get("machine_presets", [])]
 
+    def load_section_default(self, engine_id: str, section_name: str) -> dict[str, str] | None:
+        payload = self._load_payload()
+        defaults = payload.get("section_defaults", {})
+        engine_defaults = defaults.get(engine_id, {})
+        values = engine_defaults.get(section_name)
+        return {key: str(value) for key, value in values.items()} if isinstance(values, dict) else None
+
+    def save_section_default(self, engine_id: str, section_name: str, values: dict[str, str]) -> dict[str, str]:
+        payload = self._load_payload()
+        defaults = payload.setdefault("section_defaults", {})
+        engine_defaults = defaults.setdefault(engine_id, {})
+        engine_defaults[section_name] = dict(values)
+        self._persist(payload)
+        return dict(values)
+
     def save_section_preset(self, title: str, section_name: str, values: dict[str, str]) -> SectionPreset:
         payload = self._load_payload()
         presets = [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
@@ -79,7 +94,7 @@ class PresetService:
 
     def _load_payload(self) -> dict[str, object]:
         if not self._user_presets_path.exists():
-            return {"section_presets": [], "machine_presets": []}
+            return {"section_presets": [], "machine_presets": [], "section_defaults": {}}
         return json.loads(self._user_presets_path.read_text(encoding="utf-8"))
 
     def _persist(self, payload: dict[str, object]) -> None:

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.engine_support import managed_config_filename
 from dos_machines.application.import_service import ImportService
 from dos_machines.application.launcher_service import LauncherService
 from dos_machines.application.preset_service import PresetService
@@ -85,6 +86,13 @@ class WorkspaceFileView(QListView):
 
 
 class WorkspaceFileModel(QFileSystemModel):
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and index.isValid():
+            file_info = self.fileInfo(index)
+            if file_info.isFile() and file_info.suffix() == "desktop":
+                return file_info.completeBaseName()
+        return super().data(index, role)
+
     def flags(self, index):
         flags = super().flags(index)
         if not index.isValid():
@@ -235,6 +243,9 @@ class MainWindow(QMainWindow):
 
         request = dialog.build_request()
         try:
+            request = self._resolve_new_machine_conflicts(request)
+            if request is None:
+                return
             profile = self._profile_service.create(request)
             self._launcher_service.create_launcher(profile, request.workspace_dir)
         except FileExistsError:
@@ -246,6 +257,54 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Create Machine Failed", str(exc))
         self._refresh()
+
+    def _resolve_new_machine_conflicts(self, request: CreateProfileRequest) -> CreateProfileRequest | None:
+        managed_dir = request.game_dir.expanduser().resolve() / ".dosmachines"
+        target_config_path = managed_dir / managed_config_filename(request.engine_binary)
+        existing_profile_path = managed_dir / "profile.json"
+        if not target_config_path.exists() and not existing_profile_path.exists():
+            return request
+
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Warning)
+        message.setWindowTitle("Existing Managed Files")
+        message.setText(f"Managed files already exist in '{managed_dir}'.")
+        message.setInformativeText("Overwrite the destination config, or use the destination config as the basis for the new machine?")
+        overwrite_button = message.addButton("Overwrite", QMessageBox.ButtonRole.AcceptRole)
+        use_existing_button = message.addButton("Use Existing Config", QMessageBox.ButtonRole.ActionRole)
+        cancel_button = message.addButton(QMessageBox.StandardButton.Cancel)
+        message.setDefaultButton(overwrite_button)
+        message.exec()
+
+        clicked = message.clickedButton()
+        if clicked == cancel_button:
+            return None
+        if clicked == overwrite_button:
+            request.overwrite_existing = True
+            return request
+        if clicked == use_existing_button:
+            if not target_config_path.exists():
+                QMessageBox.warning(
+                    self,
+                    "Config Missing",
+                    f"No existing config file was found at '{target_config_path}'.",
+                )
+                return None
+            analysis = self._import_service.analyse_config(target_config_path)
+            dialog = CreateMachineDialog(
+                self._current_dir,
+                self._engine_registry,
+                self._preset_service,
+                import_service=self._import_service,
+                import_analysis=analysis,
+                parent=self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            imported_request = dialog.build_request()
+            imported_request.overwrite_existing = True
+            return imported_request
+        return None
 
     def _import_paths(self, paths: list[Path]) -> bool:
         config_paths = [path for path in paths if self._import_service.can_import(path)]

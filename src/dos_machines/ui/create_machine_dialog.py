@@ -144,6 +144,7 @@ class SectionEditorDialog(QDialog):
         section: SchemaSection,
         option_states: dict[str, OptionState],
         preset_service: PresetService,
+        engine_id: str | None = None,
         issues: list[ImportIssue] | None = None,
         parent=None,
     ) -> None:
@@ -153,6 +154,7 @@ class SectionEditorDialog(QDialog):
         self._section = section
         self._option_states = option_states
         self._preset_service = preset_service
+        self._engine_id = engine_id
         self._issues = issues or []
         self._field_widgets: dict[str, QWidget] = {}
 
@@ -167,8 +169,11 @@ class SectionEditorDialog(QDialog):
         self._apply_preset_button.clicked.connect(self._apply_section_preset)
         self._save_preset_button = QPushButton("Save Section Preset")
         self._save_preset_button.clicked.connect(self._save_section_preset)
+        self._save_default_button = QPushButton("Save as Default")
+        self._save_default_button.clicked.connect(self._save_section_default)
         toolbar.addWidget(self._apply_preset_button)
         toolbar.addWidget(self._save_preset_button)
+        toolbar.addWidget(self._save_default_button)
         toolbar.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -298,6 +303,18 @@ class SectionEditorDialog(QDialog):
         self._preset_service.save_section_preset(title.strip(), self._section.name, values)
         QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
 
+    def _save_section_default(self) -> None:
+        if self._engine_id is None:
+            QMessageBox.warning(self, "Schema Not Loaded", "Load an engine schema before saving defaults.")
+            return
+        values = {
+            option_name: state.value
+            for option_name, state in self._option_states.items()
+            if state.checked
+        }
+        self._preset_service.save_section_default(self._engine_id, self._section.name, values)
+        QMessageBox.information(self, "Default Saved", f"Saved default for section '{self._section.name}'.")
+
     def _format_help_text(self, text: str) -> str:
         lines: list[str] = []
         for index, raw_line in enumerate(text.splitlines()):
@@ -325,11 +342,12 @@ class SectionEditorDialog(QDialog):
 
 
 class AutoexecEditorDialog(QDialog):
-    def __init__(self, autoexec_text: str, preset_service: PresetService, parent=None) -> None:
+    def __init__(self, autoexec_text: str, preset_service: PresetService, engine_id: str | None = None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Section: autoexec")
         self.resize(760, 600)
         self._preset_service = preset_service
+        self._engine_id = engine_id
         self._editor = QTextEdit()
         self._editor.setPlainText(autoexec_text)
 
@@ -338,8 +356,11 @@ class AutoexecEditorDialog(QDialog):
         apply_button.clicked.connect(self._apply_section_preset)
         save_button = QPushButton("Save Section Preset")
         save_button.clicked.connect(self._save_section_preset)
+        save_default_button = QPushButton("Save as Default")
+        save_default_button.clicked.connect(self._save_section_default)
         toolbar.addWidget(apply_button)
         toolbar.addWidget(save_button)
+        toolbar.addWidget(save_default_button)
         toolbar.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -375,6 +396,13 @@ class AutoexecEditorDialog(QDialog):
         self._preset_service.save_section_preset(title.strip(), "autoexec", {"__text__": self.autoexec_text})
         QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
 
+    def _save_section_default(self) -> None:
+        if self._engine_id is None:
+            QMessageBox.warning(self, "Schema Not Loaded", "Load an engine schema before saving defaults.")
+            return
+        self._preset_service.save_section_default(self._engine_id, "autoexec", {"__text__": self.autoexec_text})
+        QMessageBox.information(self, "Default Saved", "Saved default for section 'autoexec'.")
+
 
 class CreateMachineDialog(QDialog):
     def __init__(
@@ -398,6 +426,7 @@ class CreateMachineDialog(QDialog):
         self._renderer = ConfigRenderer()
         self._profile = profile
         self._schema: EngineSchema | None = None
+        self._engine_id: str | None = None
         self._option_states: dict[str, dict[str, OptionState]] = {}
         self._section_buttons: dict[str, QPushButton] = {}
         self._autoexec_text = profile.autoexec_text if profile is not None else ""
@@ -565,6 +594,7 @@ class CreateMachineDialog(QDialog):
         assert self._profile is not None
         cache = self._engine_registry.register(self._profile.engine.binary_path)
         self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
+        self._engine_id = cache.ref.engine_id
         self._option_states = {
             section.name: {
                 option.name: self._profile.option_states.get(section.name, {}).get(
@@ -606,6 +636,7 @@ class CreateMachineDialog(QDialog):
         try:
             cache = self._engine_registry.register(binary_path)
             self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
+            self._engine_id = cache.ref.engine_id
         except Exception as exc:
             QMessageBox.critical(self, "Engine Load Failed", str(exc))
             return
@@ -634,6 +665,8 @@ class CreateMachineDialog(QDialog):
                 ),
                 binary_path,
             )
+        if self._profile is None and self._import_analysis is None and self._engine_id is not None:
+            self._apply_engine_section_defaults()
         self._rebuild_sections_overview()
 
     def _rebuild_sections_overview(self) -> None:
@@ -673,7 +706,7 @@ class CreateMachineDialog(QDialog):
 
     def _open_section_dialog(self, section_name: str) -> None:
         if section_name == "autoexec":
-            dialog = AutoexecEditorDialog(self._autoexec_text, self._preset_service, self)
+            dialog = AutoexecEditorDialog(self._autoexec_text, self._preset_service, self._engine_id, self)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             self._autoexec_text = dialog.autoexec_text
@@ -688,6 +721,7 @@ class CreateMachineDialog(QDialog):
             section=section,
             option_states=self._option_states[section_name],
             preset_service=self._preset_service,
+            engine_id=self._engine_id,
             issues=[issue for issue in self._import_issues if issue.section_name == section_name],
             parent=self,
         )
@@ -853,3 +887,20 @@ class CreateMachineDialog(QDialog):
                 continue
         self._import_issues = remaining
         self._rebuild_sections_overview()
+
+    def _apply_engine_section_defaults(self) -> None:
+        assert self._engine_id is not None
+        for section_name, options in self._option_states.items():
+            values = self._preset_service.load_section_default(self._engine_id, section_name)
+            if not values:
+                continue
+            for option_name, value in values.items():
+                state = options.get(option_name)
+                if state is None:
+                    continue
+                state.value = value
+                state.checked = True
+                state.origin = "default-preset"
+        autoexec_default = self._preset_service.load_section_default(self._engine_id, "autoexec")
+        if autoexec_default and "__text__" in autoexec_default:
+            self._autoexec_text = autoexec_default["__text__"]

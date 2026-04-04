@@ -29,6 +29,7 @@ class CreateProfileRequest:
     raw_overrides: dict[str, dict[str, str]] | None = None
     import_source_path: Path | None = None
     existing_profile_path: Path | None = None
+    overwrite_existing: bool = False
 
 
 class ProfileService:
@@ -66,12 +67,15 @@ class ProfileService:
         managed_dir = self.managed_dir(game_dir)
         managed_dir.mkdir(parents=True, exist_ok=True)
         profile_path = managed_dir / "profile.json"
-        if profile_path.exists() and request.existing_profile_path is None:
+        if profile_path.exists() and request.existing_profile_path is None and not request.overwrite_existing:
             raise FileExistsError(f"Game is already registered: {profile_path}")
 
         engine_cache = self._engine_registry.register(request.engine_binary)
         schema = self._engine_registry.load_schema(engine_cache.ref.engine_id)
-        existing = self.load(request.existing_profile_path) if request.existing_profile_path else None
+        existing_profile_path = request.existing_profile_path
+        if existing_profile_path is None and request.overwrite_existing and profile_path.exists():
+            existing_profile_path = profile_path
+        existing = self.load(existing_profile_path) if existing_profile_path else None
         machine_id = existing.identity.machine_id if existing is not None else uuid4().hex
         working_dir = game_dir
         ui_state = existing.ui if existing is not None else UiState()

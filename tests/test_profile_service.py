@@ -253,3 +253,49 @@ def test_dosbox_x_profile_writes_dosbox_x_conf(tmp_path: Path) -> None:
     assert 'mount c ".."' in config_text
     assert "cd .dosmachines" in config_text
     assert "cd .." in config_text
+
+
+def test_create_can_overwrite_existing_managed_profile(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    option_states = {
+        section.name: {
+            option.name: OptionState(value=option.default_value, checked=True, origin="default")
+            for option in section.options
+        }
+        for section in schema.sections
+        if section.name != "autoexec"
+    }
+
+    original = profile_service.create(
+        CreateProfileRequest(
+            title="Original",
+            game_dir=tmp_path / "overwrite-me",
+            executable="OLD.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states=option_states,
+        )
+    )
+
+    updated = profile_service.create(
+        CreateProfileRequest(
+            title="Replacement",
+            game_dir=original.game.game_dir,
+            executable="NEW.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states=option_states,
+            overwrite_existing=True,
+        )
+    )
+
+    reloaded = profile_service.load(original.game.game_dir / ".dosmachines" / "profile.json")
+    assert updated.identity.machine_id == original.identity.machine_id
+    assert reloaded.identity.title == "Replacement"
+    assert reloaded.game.executable == "NEW.EXE"
