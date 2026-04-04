@@ -130,6 +130,8 @@ def test_autoexec_defaults_are_backfilled_for_existing_profiles(tmp_path: Path) 
     )
     profile = profile_service.create(request)
     assert "mount c" in profile.autoexec_text
+    assert 'mount c ".."' in profile.autoexec_text
+    assert "c:" in profile.autoexec_text
     assert "PRINCE.EXE" not in profile.autoexec_text
 
 
@@ -252,8 +254,7 @@ def test_dosbox_x_profile_writes_dosbox_x_conf(tmp_path: Path) -> None:
     assert not (managed_dir / "dosbox.conf").exists()
     config_text = (managed_dir / "dosbox-x.conf").read_text(encoding="utf-8")
     assert 'mount c ".."' in config_text
-    assert "cd .dosmachines" in config_text
-    assert "cd .." in config_text
+    assert "c:" in config_text
 
 
 def test_create_can_overwrite_existing_managed_profile(tmp_path: Path) -> None:
@@ -300,3 +301,59 @@ def test_create_can_overwrite_existing_managed_profile(tmp_path: Path) -> None:
     assert updated.identity.machine_id == original.identity.machine_id
     assert reloaded.identity.title == "Replacement"
     assert reloaded.game.executable == "NEW.EXE"
+
+
+def test_profile_icon_can_be_set_and_cleared(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    option_states = {
+        section.name: {
+            option.name: OptionState(value=option.default_value, checked=True, origin="default")
+            for option in section.options
+        }
+        for section in schema.sections
+        if section.name != "autoexec"
+    }
+    icon_source = tmp_path / "icon.svg"
+    icon_source.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>',
+        encoding="utf-8",
+    )
+
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Icon Game",
+            game_dir=tmp_path / "icon-game",
+            executable="",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            icon_source=icon_source,
+            option_states=option_states,
+        )
+    )
+
+    assert profile.ui.icon_path is not None
+    assert profile.ui.icon_path.exists()
+    assert profile.ui.icon_path.suffix == ".svg"
+
+    updated = profile_service.create(
+        CreateProfileRequest(
+            title="Icon Game",
+            game_dir=profile.game.game_dir,
+            executable="",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states=profile.option_states,
+            autoexec_text=profile.autoexec_text,
+            existing_profile_path=profile.game.game_dir / ".dosmachines" / "profile.json",
+            remove_icon=True,
+        )
+    )
+
+    assert updated.ui.icon_path is None
+    assert not (profile.game.game_dir / ".dosmachines" / "icon.svg").exists()

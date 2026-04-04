@@ -69,12 +69,9 @@ class ConfigRenderer:
                 "# Lines in this section are run at startup.",
                 'mount c ".."',
                 "c:",
-                "cd .dosmachines",
-                "cd ..",
             ]
         return [
             "# Lines in this section are run at startup.",
-            f"mount c \"{game.game_dir}\"",
+            'mount c ".."',
             "c:",
-            self._render_cd_from_game(game),
         ]

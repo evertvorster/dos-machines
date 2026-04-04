@@ -44,10 +44,10 @@ def test_new_machine_applies_engine_scoped_section_defaults(tmp_path: Path) -> N
     preset_service.save_section_default(cache.ref.engine_id, "sdl", {"fullscreen": "true"})
     preset_service.save_section_default(cache.ref.engine_id, "autoexec", {"__text__": "mount c \".\"\nc:"})
 
-    dialog = CreateMachineDialog(tmp_path / "workspace", engine_registry, preset_service)
+    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service)
     dialog.engine_binary_edit.setText(str(binary))
     dialog.game_dir_edit.setText(str(tmp_path / "game"))
-    dialog._load_schema()
+    dialog._load_schema_if_possible()
 
     assert dialog._option_states["sdl"]["fullscreen"].value == "true"
     assert dialog._option_states["sdl"]["fullscreen"].origin == "default-preset"
@@ -90,6 +90,7 @@ def test_existing_machine_does_not_apply_engine_scoped_section_defaults(tmp_path
 
     configured = CreateMachineDialog(
         tmp_path / "workspace",
+        settings_service,
         engine_registry,
         preset_service,
         profile=profile,
@@ -97,3 +98,19 @@ def test_existing_machine_does_not_apply_engine_scoped_section_defaults(tmp_path
 
     assert configured._option_states["sdl"]["fullscreen"].value == "false"
     assert configured._option_states["sdl"]["fullscreen"].origin == "user"
+
+
+def test_icon_selection_prefers_capture_directory(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service)
+
+    game_dir = tmp_path / "game"
+    capture_dir = game_dir / ".dosmachines" / "capture"
+    capture_dir.mkdir(parents=True)
+    dialog.game_dir_edit.setText(str(game_dir))
+
+    assert dialog._icon_start_dir() == capture_dir

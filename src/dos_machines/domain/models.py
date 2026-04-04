@@ -28,18 +28,24 @@ class AppPaths:
 class Settings:
     workspace_path: Path
     recent_workspaces: list[Path] = field(default_factory=list)
+    last_engine_binary_path: Path | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "workspace_path": str(self.workspace_path),
             "recent_workspaces": [str(path) for path in self.recent_workspaces],
+            "last_engine_binary_path": _path_to_str(self.last_engine_binary_path),
         }
 
     @classmethod
     def from_json(cls, payload: dict[str, Any], default_workspace: Path) -> "Settings":
         workspace_path = Path(payload.get("workspace_path", default_workspace))
         recent = [Path(path) for path in payload.get("recent_workspaces", [])]
-        return cls(workspace_path=workspace_path, recent_workspaces=recent)
+        return cls(
+            workspace_path=workspace_path,
+            recent_workspaces=recent,
+            last_engine_binary_path=_path_from_str(payload.get("last_engine_binary_path")),
+        )
 
 
 @dataclass(slots=True)

@@ -4,6 +4,7 @@ from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -33,6 +34,7 @@ from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.import_service import ImportAnalysis, ImportIssue, ImportService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
+from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState, SchemaOption, SchemaSection
 
 
@@ -408,6 +410,7 @@ class CreateMachineDialog(QDialog):
     def __init__(
         self,
         workspace_dir: Path,
+        settings_service: SettingsService,
         engine_registry: EngineRegistry,
         preset_service: PresetService,
         profile: MachineProfile | None = None,
@@ -419,6 +422,7 @@ class CreateMachineDialog(QDialog):
         self.setWindowTitle("Configure Imported Machine" if import_analysis is not None else "Configure Machine" if profile is not None else "Add New Machine")
         self.resize(980, 760)
         self._workspace_dir = workspace_dir
+        self._settings_service = settings_service
         self._engine_registry = engine_registry
         self._preset_service = preset_service
         self._import_service = import_service
@@ -430,27 +434,43 @@ class CreateMachineDialog(QDialog):
         self._option_states: dict[str, dict[str, OptionState]] = {}
         self._section_buttons: dict[str, QPushButton] = {}
         self._autoexec_text = profile.autoexec_text if profile is not None else ""
+        self._icon_source = profile.ui.icon_path if profile is not None else None
+        self._remove_icon = False
         self._import_issues: list[ImportIssue] = list(import_analysis.issues) if import_analysis is not None else []
         self._raw_import_text = import_analysis.raw_text if import_analysis is not None else ""
         self._last_reanalysed_raw_text = self._raw_import_text
         self._raw_import_edit = QTextEdit()
         self._raw_import_edit.setPlainText(self._raw_import_text)
+        settings = self._settings_service.load()
 
         self.title_edit = QLineEdit(profile.identity.title if profile else import_analysis.title if import_analysis else "")
         self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else str(import_analysis.game_dir) if import_analysis else "")
-        self.engine_binary_edit = QLineEdit(str(profile.engine.binary_path) if profile else str(import_analysis.engine_binary) if import_analysis else "/usr/bin/dosbox")
+        self.engine_binary_edit = QLineEdit(
+            str(profile.engine.binary_path)
+            if profile else str(import_analysis.engine_binary)
+            if import_analysis else str(settings.last_engine_binary_path)
+            if settings.last_engine_binary_path is not None else ""
+        )
 
-        self._load_engine_button = QPushButton("Load Engine Schema")
-        self._load_engine_button.clicked.connect(self._load_schema)
         self._save_machine_preset_button = QPushButton("Save Machine Preset")
         self._save_machine_preset_button.clicked.connect(self._save_machine_preset)
         self._apply_machine_preset_button = QPushButton("Apply Machine Preset")
         self._apply_machine_preset_button.clicked.connect(self._apply_machine_preset)
         self._config_preview = QTextEdit()
         self._config_preview.setReadOnly(True)
+        self._icon_preview = QLabel()
+        self._icon_preview.setFixedSize(96, 96)
+        self._icon_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_preview.setFrameShape(QLabel.Shape.Box)
+        self._icon_preview.setFrameShadow(QLabel.Shadow.Sunken)
+        self._change_icon_button = QPushButton("Change Icon")
+        self._change_icon_button.clicked.connect(self._choose_icon)
+        self._default_icon_button = QPushButton("Default Icon")
+        self._default_icon_button.clicked.connect(self._use_default_icon)
 
         self.game_dir_edit.textChanged.connect(self._handle_metadata_changed)
         self.engine_binary_edit.textChanged.connect(self._update_preview)
+        self.engine_binary_edit.editingFinished.connect(self._load_schema_if_possible)
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_metadata_tab(), "Machine")
@@ -472,6 +492,8 @@ class CreateMachineDialog(QDialog):
             self._load_schema_from_profile()
         elif import_analysis is not None:
             self._load_schema_from_import()
+        else:
+            self._load_schema_if_possible(silent=True)
         self._sync_buttons()
 
     def build_request(self) -> CreateProfileRequest:
@@ -490,6 +512,8 @@ class CreateMachineDialog(QDialog):
             workspace_dir=self._workspace_dir,
             setup_executable=self._profile.game.setup_executable if self._profile is not None else None,
             notes=notes,
+            icon_source=self._icon_source,
+            remove_icon=self._remove_icon,
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
             raw_overrides=self._import_analysis.raw_overrides if self._import_analysis is not None else None,
@@ -504,7 +528,14 @@ class CreateMachineDialog(QDialog):
         form.addRow("Title", self.title_edit)
         form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
         form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
-        form.addRow("", self._load_engine_button)
+        icon_controls = QVBoxLayout()
+        icon_controls.addWidget(self._icon_preview, alignment=Qt.AlignmentFlag.AlignLeft)
+        icon_buttons = QHBoxLayout()
+        icon_buttons.addWidget(self._change_icon_button)
+        icon_buttons.addWidget(self._default_icon_button)
+        icon_buttons.addStretch(1)
+        icon_controls.addLayout(icon_buttons)
+        form.addRow("Icon", icon_controls)
         layout.addLayout(form)
         layout.addStretch(1)
         return tab
@@ -564,6 +595,32 @@ class CreateMachineDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary", self.engine_binary_edit.text().strip())
         if path:
             self.engine_binary_edit.setText(path)
+            self._load_schema_if_possible()
+
+    def _choose_icon(self) -> None:
+        filters = "Icons and Images (*.png *.svg *.svgz *.xpm *.ico *.icns *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)"
+        path, _ = QFileDialog.getOpenFileName(self, "Select Icon", str(self._icon_start_dir()), filters)
+        if not path:
+            return
+        self._icon_source = Path(path).expanduser()
+        self._remove_icon = False
+        self._update_icon_preview()
+
+    def _use_default_icon(self) -> None:
+        self._icon_source = None
+        self._remove_icon = True
+        self._update_icon_preview()
+
+    def _icon_start_dir(self) -> Path:
+        game_dir_text = self.game_dir_edit.text().strip()
+        if game_dir_text:
+            game_dir = Path(game_dir_text).expanduser()
+            capture_dir = game_dir / ".dosmachines" / "capture"
+            if capture_dir.is_dir():
+                return capture_dir
+            if game_dir.is_dir():
+                return game_dir
+        return Path.home()
 
     def _load_schema_from_profile(self) -> None:
         assert self._profile is not None
@@ -584,6 +641,7 @@ class CreateMachineDialog(QDialog):
             self._profile.game,
             self._profile.engine.binary_path,
         )
+        self._update_icon_preview()
         self._rebuild_sections_overview()
 
     def _load_schema_from_import(self) -> None:
@@ -601,19 +659,27 @@ class CreateMachineDialog(QDialog):
             for section in self._schema.sections
         }
         self._autoexec_text = self._import_analysis.autoexec_text
+        self._update_icon_preview()
         self._rebuild_sections_overview()
 
-    def _load_schema(self) -> None:
+    def _load_schema_if_possible(self, silent: bool = False) -> None:
         binary_path = Path(self.engine_binary_edit.text().strip()).expanduser()
         if not binary_path:
-            QMessageBox.warning(self, "Missing Binary", "Choose a DOSBox binary first.")
+            self._schema = None
+            self._engine_id = None
+            self._option_states = {}
+            self._rebuild_sections_overview()
             return
         try:
             cache = self._engine_registry.register(binary_path)
             self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
             self._engine_id = cache.ref.engine_id
+            settings = self._settings_service.load()
+            settings.last_engine_binary_path = binary_path
+            self._settings_service.save(settings)
         except Exception as exc:
-            QMessageBox.critical(self, "Engine Load Failed", str(exc))
+            if not silent:
+                QMessageBox.critical(self, "Engine Load Failed", str(exc))
             return
 
         existing_option_states = self._option_states
@@ -642,6 +708,7 @@ class CreateMachineDialog(QDialog):
             )
         if self._profile is None and self._import_analysis is None and self._engine_id is not None:
             self._apply_engine_section_defaults()
+        self._update_icon_preview()
         self._rebuild_sections_overview()
 
     def _rebuild_sections_overview(self) -> None:
@@ -881,3 +948,14 @@ class CreateMachineDialog(QDialog):
 
     def _handle_metadata_changed(self) -> None:
         self._update_preview()
+
+    def _update_icon_preview(self) -> None:
+        icon = None
+        if self._icon_source is not None:
+            icon = QIcon(str(self._icon_source))
+        elif self._profile is not None and self._profile.ui.icon_path is not None and not self._remove_icon:
+            icon = QIcon(str(self._profile.ui.icon_path))
+        if icon is None or icon.isNull():
+            icon = QIcon.fromTheme("applications-games")
+        pixmap = icon.pixmap(QSize(72, 72))
+        self._icon_preview.setPixmap(pixmap)

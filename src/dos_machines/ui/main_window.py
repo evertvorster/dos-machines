@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, QFile, QRect, QSize, Qt
-from PySide6.QtGui import QAction, QFontMetrics, QTextLayout
+from PySide6.QtCore import QAbstractListModel, QDir, QFile, QModelIndex, QMimeData, QRect, QSize, Qt
+from PySide6.QtGui import QAction, QFontMetrics, QIcon, QTextLayout
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -31,6 +31,154 @@ from dos_machines.domain.models import MachineProfile
 from dos_machines.ui.create_machine_dialog import CreateMachineDialog
 
 
+class WorkspaceListModel(QAbstractListModel):
+    def __init__(self, source_model: QFileSystemModel, workspace_root: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._source_model = source_model
+        self._workspace_root = workspace_root
+        self._current_dir = workspace_root
+        self._source_model.directoryLoaded.connect(self._on_source_directory_loaded)
+        self._source_model.rowsInserted.connect(self._on_source_rows_changed)
+        self._source_model.rowsRemoved.connect(self._on_source_rows_changed)
+        self._source_model.modelReset.connect(self._reset_from_source)
+
+    def set_current_dir(self, current_dir: Path) -> None:
+        if self._current_dir == current_dir:
+            self._ensure_current_dir_loaded()
+            self._reset_from_source()
+            return
+        self.beginResetModel()
+        self._current_dir = current_dir
+        self.endResetModel()
+        self._ensure_current_dir_loaded()
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        if parent.isValid():
+            return 0
+        return len(self._source_indexes()) + self._up_row_count()
+
+    def sourceModel(self) -> QFileSystemModel:
+        return self._source_model
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        if self.is_up_item(index):
+            if role == Qt.ItemDataRole.DisplayRole:
+                return ".."
+            if role == Qt.ItemDataRole.DecorationRole:
+                return QIcon.fromTheme("go-up")
+            return None
+        source_index = self.map_to_source(index)
+        return self._source_model.data(source_index, role)
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.ItemIsDropEnabled
+        if self.is_up_item(index):
+            return (
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsDropEnabled
+            )
+        return self._source_model.flags(self.map_to_source(index))
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if not index.isValid() or self.is_up_item(index):
+            return False
+        changed = self._source_model.setData(self.map_to_source(index), value, role)
+        if changed:
+            self.dataChanged.emit(index, index, [role])
+        return changed
+
+    def supportedDropActions(self):
+        return self._source_model.supportedDropActions()
+
+    def supportedDragActions(self):
+        return self._source_model.supportedDragActions()
+
+    def mimeTypes(self) -> list[str]:
+        return self._source_model.mimeTypes()
+
+    def mimeData(self, indexes) -> QMimeData | None:
+        source_indexes = [
+            self.map_to_source(index)
+            for index in indexes
+            if index.isValid() and not self.is_up_item(index)
+        ]
+        source_indexes = [index for index in source_indexes if index.isValid()]
+        if not source_indexes:
+            return None
+        return self._source_model.mimeData(source_indexes)
+
+    def index(self, row: int, column: int, parent=QModelIndex()):
+        if parent.isValid() or column != 0 or row < 0 or row >= self.rowCount():
+            return QModelIndex()
+        return self.createIndex(row, column)
+
+    def parent(self, index):
+        return QModelIndex()
+
+    def is_up_item(self, index) -> bool:
+        return index.isValid() and self._up_row_count() == 1 and index.row() == 0
+
+    def file_path(self, index) -> Path | None:
+        if not index.isValid() or self.is_up_item(index):
+            return None
+        return Path(self._source_model.filePath(self.map_to_source(index)))
+
+    def is_dir(self, index) -> bool:
+        if not index.isValid():
+            return False
+        if self.is_up_item(index):
+            return True
+        return self._source_model.isDir(self.map_to_source(index))
+
+    def drop_target_index(self, index):
+        if not index.isValid():
+            return QModelIndex()
+        if self.is_up_item(index):
+            return self._source_model.index(str(self._current_dir.parent))
+        return self.map_to_source(index)
+
+    def _up_row_count(self) -> int:
+        return 1 if self._current_dir != self._workspace_root else 0
+
+    def _source_indexes(self) -> list[QModelIndex]:
+        source_parent = self._source_model.index(str(self._current_dir))
+        if source_parent.isValid() and self._source_model.canFetchMore(source_parent):
+            self._source_model.fetchMore(source_parent)
+        rows = self._source_model.rowCount(source_parent)
+        return [self._source_model.index(row, 0, source_parent) for row in range(rows)]
+
+    def map_to_source(self, proxy_index):
+        if not proxy_index.isValid() or self.is_up_item(proxy_index):
+            return QModelIndex()
+        source_row = proxy_index.row() - self._up_row_count()
+        source_indexes = self._source_indexes()
+        if source_row < 0 or source_row >= len(source_indexes):
+            return QModelIndex()
+        return source_indexes[source_row]
+
+    def _reset_from_source(self) -> None:
+        self.beginResetModel()
+        self.endResetModel()
+
+    def _ensure_current_dir_loaded(self) -> None:
+        source_parent = self._source_model.index(str(self._current_dir))
+        if source_parent.isValid() and self._source_model.canFetchMore(source_parent):
+            self._source_model.fetchMore(source_parent)
+
+    def _on_source_directory_loaded(self, path: str) -> None:
+        if Path(path) == self._current_dir:
+            self._reset_from_source()
+
+    def _on_source_rows_changed(self, parent: QModelIndex, first: int, last: int) -> None:
+        source_path = Path(self._source_model.filePath(parent)) if parent.isValid() else None
+        if source_path == self._current_dir:
+            self._reset_from_source()
+
+
 class WorkspaceFileView(QListView):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -54,7 +202,7 @@ class WorkspaceFileView(QListView):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        if event.mimeData().hasUrls() and self._import_handler is not None:
+        if event.source() is not self and event.mimeData().hasUrls() and self._import_handler is not None:
             import_paths = [
                 Path(url.toLocalFile())
                 for url in event.mimeData().urls()
@@ -68,14 +216,15 @@ class WorkspaceFileView(QListView):
             super().dropEvent(event)
             return
         model = self.model()
-        if not model.isDir(target_index):
+        if not model.is_dir(target_index):
             super().dropEvent(event)
             return
         mime_data = event.mimeData()
         if mime_data is None:
             super().dropEvent(event)
             return
-        if model.dropMimeData(mime_data, Qt.DropAction.MoveAction, -1, -1, target_index):
+        source_model = model.sourceModel() if hasattr(model, "sourceModel") else model
+        if source_model.dropMimeData(mime_data, Qt.DropAction.MoveAction, -1, -1, model.drop_target_index(target_index)):
             event.setDropAction(Qt.DropAction.MoveAction)
             event.acceptProposedAction()
             return
@@ -85,7 +234,7 @@ class WorkspaceFileView(QListView):
         target_index = self.indexAt(point)
         if not target_index.isValid():
             return False
-        return self.model().isDir(target_index)
+        return self.model().is_dir(target_index)
 
 
 class WorkspaceFileModel(QFileSystemModel):
@@ -203,6 +352,7 @@ class MainWindow(QMainWindow):
             | QDir.Filter.NoDotAndDotDot
         )
         self._model.fileRenamed.connect(self._on_file_renamed)
+        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self)
         self._view = WorkspaceFileView(self)
         self._view.setViewMode(QListView.ViewMode.IconMode)
         self._view.setMovement(QListView.Movement.Static)
@@ -221,8 +371,7 @@ class MainWindow(QMainWindow):
             QListView.EditTrigger.EditKeyPressed
         )
         self._view.setItemDelegate(WorkspaceItemDelegate(self._view))
-        self._view.setModel(self._model)
-        self._view.setRootIndex(self._model.index(str(self._current_dir)))
+        self._view.setModel(self._list_model)
         self._view.set_import_handler(self._import_paths)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
@@ -268,7 +417,7 @@ class MainWindow(QMainWindow):
         workspace = self._workspace_service.ensure_workspace()
         if not self._current_dir.exists():
             self._current_dir = workspace
-        self._view.setRootIndex(self._model.index(str(self._current_dir)))
+        self._list_model.set_current_dir(self._current_dir)
         self.statusBar().showMessage(str(self._current_dir))
 
     def _choose_workspace(self) -> None:
@@ -278,6 +427,8 @@ class MainWindow(QMainWindow):
         self._workspace_service.set_workspace(Path(path))
         self._current_dir = self._workspace_service.workspace_path
         self._model.setRootPath(str(self._current_dir))
+        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self)
+        self._view.setModel(self._list_model)
         self._refresh()
 
     def _go_up(self) -> None:
@@ -300,6 +451,7 @@ class MainWindow(QMainWindow):
     def _add_machine(self) -> None:
         dialog = CreateMachineDialog(
             self._current_dir,
+            self._settings_service,
             self._engine_registry,
             self._preset_service,
             import_service=self._import_service,
@@ -360,6 +512,7 @@ class MainWindow(QMainWindow):
             analysis = self._import_service.analyse_config(target_config_path)
             dialog = CreateMachineDialog(
                 self._current_dir,
+                self._settings_service,
                 self._engine_registry,
                 self._preset_service,
                 import_service=self._import_service,
@@ -384,6 +537,7 @@ class MainWindow(QMainWindow):
                 if analysis.has_issues:
                     dialog = CreateMachineDialog(
                         self._current_dir,
+                        self._settings_service,
                         self._engine_registry,
                         self._preset_service,
                         import_service=self._import_service,
@@ -419,8 +573,15 @@ class MainWindow(QMainWindow):
 
     def _open_context_menu(self, point) -> None:
         index = self._view.indexAt(point)
-        path = Path(self._model.filePath(index)) if index.isValid() else None
+        if index.isValid() and self._list_model.is_up_item(index):
+            path = None
+        else:
+            path = self._list_model.file_path(index) if index.isValid() else None
         menu = QMenu(self)
+        if index.isValid() and self._list_model.is_up_item(index):
+            open_action = menu.addAction("Up")
+            open_action.triggered.connect(self._go_up)
+            menu.addSeparator()
         if path is not None and path.suffix == ".desktop":
             launch_action = menu.addAction("Launch")
             launch_action.triggered.connect(lambda: self._activate_index(index))
@@ -451,7 +612,12 @@ class MainWindow(QMainWindow):
         menu.exec(self._view.viewport().mapToGlobal(point))
 
     def _activate_index(self, index) -> None:
-        path = Path(self._model.filePath(index))
+        if self._list_model.is_up_item(index):
+            self._go_up()
+            return
+        path = self._list_model.file_path(index)
+        if path is None:
+            return
         if path.is_dir():
             self._open_directory(path)
             return
@@ -486,6 +652,7 @@ class MainWindow(QMainWindow):
             return
         dialog = CreateMachineDialog(
             launcher_path.parent,
+            self._settings_service,
             self._engine_registry,
             self._preset_service,
             profile=profile,
@@ -560,7 +727,7 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _rename_entry(self, index) -> None:
-        if not index.isValid():
+        if not index.isValid() or self._list_model.is_up_item(index):
             return
         self._view.edit(index)
 

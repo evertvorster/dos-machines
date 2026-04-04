@@ -24,6 +24,7 @@ class CreateProfileRequest:
     setup_executable: str | None = None
     notes: str = ""
     icon_source: Path | None = None
+    remove_icon: bool = False
     option_states: dict[str, dict[str, OptionState]] | None = None
     autoexec_text: str | None = None
     raw_overrides: dict[str, dict[str, str]] | None = None
@@ -104,8 +105,12 @@ class ProfileService:
             ),
             raw_overrides=request.raw_overrides or (existing.raw_overrides if existing is not None else {}),
         )
-        if request.icon_source is not None:
-            icon_target = managed_dir / "icon.png"
+        if request.remove_icon:
+            self._delete_managed_icon(managed_dir, existing.ui.icon_path if existing is not None else None)
+            profile.ui.icon_path = None
+        elif request.icon_source is not None:
+            self._delete_managed_icon(managed_dir, existing.ui.icon_path if existing is not None else None)
+            icon_target = managed_dir / f"icon{request.icon_source.suffix.lower() or '.png'}"
             shutil.copyfile(request.icon_source, icon_target)
             profile.ui.icon_path = icon_target
         elif existing is not None and existing.ui.icon_path is not None:
@@ -138,13 +143,18 @@ class ProfileService:
         if resolved_profile_path.exists():
             resolved_profile_path.unlink()
         if existing is not None and existing.ui.icon_path is not None and existing.ui.icon_path.exists():
-            icon_path = existing.ui.icon_path.expanduser().resolve()
-            if icon_path.parent == managed_dir:
-                icon_path.unlink()
+            self._delete_managed_icon(managed_dir, existing.ui.icon_path)
         try:
             managed_dir.rmdir()
         except OSError:
             pass
+
+    def _delete_managed_icon(self, managed_dir: Path, icon_path: Path | None) -> None:
+        if icon_path is None:
+            return
+        resolved = icon_path.expanduser().resolve()
+        if resolved.parent == managed_dir and resolved.exists():
+            resolved.unlink()
 
     def _build_identity(self, machine_id: str, title: str, notes: str):
         from dos_machines.domain.models import ProfileIdentity
