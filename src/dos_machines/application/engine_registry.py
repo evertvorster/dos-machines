@@ -112,6 +112,6 @@ class EngineRegistry:
 
     def _load_default_config_text(self, binary_path: Path) -> str:
         bundled = bundled_default_config_path()
-        if bundled.exists():
+        if bundled is not None:
             return bundled.read_text(encoding="utf-8")
         return f"# No bundled config sample found for {display_name_for_engine()}.\n"

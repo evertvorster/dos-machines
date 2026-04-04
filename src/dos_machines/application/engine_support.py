@@ -21,8 +21,18 @@ def engine_id_prefix(version: str | None = None) -> str:
     return "dosbox"
 
 
-def bundled_default_config_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "examples" / "dosbox-staging.conf"
+def bundled_default_config_path() -> Path | None:
+    candidates = [
+        Path.home() / ".config" / "dosbox" / "dosbox-staging.conf",
+        Path.home() / ".config" / "dosbox" / "dosbox.conf",
+        Path("/usr/share/dos-machines/dosbox-staging.conf"),
+        Path(__file__).resolve().parents[3] / "share" / "dos-machines" / "dosbox-staging.conf",
+        Path(__file__).resolve().parents[3] / "examples" / "dosbox-staging.conf",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def detect_engine_version(binary_path: Path) -> str | None:

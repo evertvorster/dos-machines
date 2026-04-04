@@ -11,7 +11,24 @@ This initial scaffold provides:
 - generated managed `dosbox.conf`
 - generated `.desktop` launchers with DOS Machines metadata
 
-## Run
+## Arch Linux
+
+Build and install with the included `PKGBUILD`:
+
+```bash
+makepkg -si
+```
+
+The package installs:
+
+- the Python application into the system Python environment
+- the desktop launcher into `/usr/share/applications`
+- the app icon into `/usr/share/icons/hicolor/scalable/apps`
+- the default DOSBox Staging config into `/usr/share/dos-machines`
+
+`dosbox-staging` is a runtime dependency of the package.
+
+## Development
 
 Install dependencies and run the app:
 
