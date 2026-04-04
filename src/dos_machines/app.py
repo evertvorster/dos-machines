@@ -41,6 +41,7 @@ def build_main_window() -> MainWindow:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("DOS Machines")
+    app.setDesktopFileName("dos-machines")
     icon = QIcon.fromTheme("dos-machines")
     if icon.isNull():
         icon_path = Path(__file__).with_name("assets") / "dos-machines.svg"
