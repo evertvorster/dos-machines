@@ -183,9 +183,24 @@ class WorkspaceFileView(QListView):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._import_handler = None
+        self._icon_resize_handler = None
 
     def set_import_handler(self, handler) -> None:
         self._import_handler = handler
+
+    def set_icon_resize_handler(self, handler) -> None:
+        self._icon_resize_handler = handler
+
+    def wheelEvent(self, event) -> None:
+        if (
+            self._icon_resize_handler is not None
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+            and event.angleDelta().y() != 0
+        ):
+            self._icon_resize_handler(event.angleDelta().y())
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist"):
@@ -319,6 +334,9 @@ class WorkspaceItemDelegate(QStyledItemDelegate):
 
 
 class MainWindow(QMainWindow):
+    _MIN_ICON_SIZE = 32
+    _MAX_ICON_SIZE = 128
+
     def __init__(
         self,
         settings_service: SettingsService,
@@ -337,6 +355,7 @@ class MainWindow(QMainWindow):
         self._launcher_service = launcher_service
         self._engine_registry = engine_registry
         self._preset_service = preset_service
+        self._settings = self._settings_service.load()
         self._current_dir = self._workspace_service.ensure_workspace()
         self.setWindowTitle("DOS Machines")
         self.resize(960, 640)
@@ -357,8 +376,6 @@ class MainWindow(QMainWindow):
         self._view.setViewMode(QListView.ViewMode.IconMode)
         self._view.setMovement(QListView.Movement.Static)
         self._view.setResizeMode(QListView.ResizeMode.Adjust)
-        self._view.setIconSize(QSize(64, 64))
-        self._view.setGridSize(QSize(120, 100))
         self._view.setWordWrap(True)
         self._view.setDragEnabled(True)
         self._view.setAcceptDrops(True)
@@ -373,13 +390,14 @@ class MainWindow(QMainWindow):
         self._view.setItemDelegate(WorkspaceItemDelegate(self._view))
         self._view.setModel(self._list_model)
         self._view.set_import_handler(self._import_paths)
+        self._view.set_icon_resize_handler(self._resize_icons)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
         self._view.activated.connect(self._activate_index)
         self.setCentralWidget(self._view)
+        self._apply_workspace_icon_size(self._settings.workspace_icon_size)
 
         self._build_menus()
-        self._build_toolbar()
         self._refresh()
 
     def _build_menus(self) -> None:
@@ -388,10 +406,6 @@ class MainWindow(QMainWindow):
         choose_workspace = QAction("Choose Workspace…", self)
         choose_workspace.triggered.connect(self._choose_workspace)
         file_menu.addAction(choose_workspace)
-
-        up_action = QAction("Up", self)
-        up_action.triggered.connect(self._go_up)
-        file_menu.addAction(up_action)
 
         new_folder = QAction("New Folder", self)
         new_folder.triggered.connect(self._create_folder)
@@ -404,14 +418,6 @@ class MainWindow(QMainWindow):
         refresh = QAction("Refresh", self)
         refresh.triggered.connect(self._refresh)
         file_menu.addAction(refresh)
-
-    def _build_toolbar(self) -> None:
-        toolbar = self.addToolBar("Navigation")
-        toolbar.setMovable(False)
-
-        up_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogToParent), "Up", self)
-        up_action.triggered.connect(self._go_up)
-        toolbar.addAction(up_action)
 
     def _refresh(self) -> None:
         workspace = self._workspace_service.ensure_workspace()
@@ -430,6 +436,21 @@ class MainWindow(QMainWindow):
         self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self)
         self._view.setModel(self._list_model)
         self._refresh()
+
+    def _apply_workspace_icon_size(self, icon_size: int) -> None:
+        clamped = max(self._MIN_ICON_SIZE, min(self._MAX_ICON_SIZE, int(icon_size)))
+        self._view.setIconSize(QSize(clamped, clamped))
+        self._view.setGridSize(QSize(max(120, clamped + 56), max(100, clamped + 36)))
+
+    def _resize_icons(self, angle_delta_y: int) -> None:
+        step = 8 if angle_delta_y > 0 else -8
+        new_size = self._view.iconSize().width() + step
+        clamped = max(self._MIN_ICON_SIZE, min(self._MAX_ICON_SIZE, new_size))
+        if clamped == self._view.iconSize().width():
+            return
+        self._apply_workspace_icon_size(clamped)
+        self._settings.workspace_icon_size = clamped
+        self._settings_service.save(self._settings)
 
     def _go_up(self) -> None:
         workspace = self._workspace_service.workspace_path

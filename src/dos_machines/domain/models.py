@@ -29,12 +29,14 @@ class Settings:
     workspace_path: Path
     recent_workspaces: list[Path] = field(default_factory=list)
     last_engine_binary_path: Path | None = None
+    workspace_icon_size: int = 64
 
     def to_json(self) -> dict[str, Any]:
         return {
             "workspace_path": str(self.workspace_path),
             "recent_workspaces": [str(path) for path in self.recent_workspaces],
             "last_engine_binary_path": _path_to_str(self.last_engine_binary_path),
+            "workspace_icon_size": self.workspace_icon_size,
         }
 
     @classmethod
@@ -45,6 +47,7 @@ class Settings:
             workspace_path=workspace_path,
             recent_workspaces=recent,
             last_engine_binary_path=_path_from_str(payload.get("last_engine_binary_path")),
+            workspace_icon_size=int(payload.get("workspace_icon_size", 64)),
         )
 
 

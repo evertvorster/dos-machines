@@ -21,3 +21,14 @@ def test_settings_service_persists_last_engine_binary_path(tmp_path: Path) -> No
     reloaded = service.load()
 
     assert reloaded.last_engine_binary_path == Path("/usr/bin/dosbox")
+
+
+def test_settings_service_persists_workspace_icon_size(tmp_path: Path) -> None:
+    service = SettingsService(config_root=tmp_path)
+    settings = service.load()
+    settings.workspace_icon_size = 88
+
+    service.save(settings)
+    reloaded = service.load()
+
+    assert reloaded.workspace_icon_size == 88
