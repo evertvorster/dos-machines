@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import configparser
+from pathlib import Path
 
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import Settings, WorkspaceEntry

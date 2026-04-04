@@ -414,8 +414,10 @@ class CreateMachineDialog(QDialog):
 
     def build_request(self) -> CreateProfileRequest:
         existing_profile_path = None
+        notes = ""
         if self._profile is not None:
             existing_profile_path = self._profile.game.game_dir / ".dosmachines" / "profile.json"
+            notes = self._profile.identity.notes
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
             game_dir=Path(self.game_dir_edit.text().strip()).expanduser(),
@@ -423,6 +425,7 @@ class CreateMachineDialog(QDialog):
             engine_binary=Path(self.engine_binary_edit.text().strip()).expanduser(),
             workspace_dir=self._workspace_dir,
             setup_executable=self.setup_executable_edit.text().strip() or None,
+            notes=notes,
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
             existing_profile_path=existing_profile_path,

@@ -2,30 +2,80 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QFileInfo, QSize, Qt
+from PySide6.QtCore import QDir, QFile, QSize, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
-    QFileIconProvider,
+    QFileSystemModel,
     QInputDialog,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QStyle,
 )
 
 from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.launcher_service import LauncherService
 from dos_machines.application.preset_service import PresetService
-from dos_machines.application.profile_service import ProfileService
+from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.application.workspace_service import WorkspaceService
+from dos_machines.domain.models import MachineProfile
 from dos_machines.ui.create_machine_dialog import CreateMachineDialog
 
 
-UP_MARKER = ".."
+class WorkspaceFileView(QListView):
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist"):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._can_accept_drop(event.position().toPoint()):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        target_index = self.indexAt(event.position().toPoint())
+        if not target_index.isValid():
+            super().dropEvent(event)
+            return
+        model = self.model()
+        if not model.isDir(target_index):
+            super().dropEvent(event)
+            return
+        mime_data = event.mimeData()
+        if mime_data is None:
+            super().dropEvent(event)
+            return
+        if model.dropMimeData(mime_data, Qt.DropAction.MoveAction, -1, -1, target_index):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def _can_accept_drop(self, point) -> bool:
+        target_index = self.indexAt(point)
+        if not target_index.isValid():
+            return False
+        return self.model().isDir(target_index)
+
+
+class WorkspaceFileModel(QFileSystemModel):
+    def flags(self, index):
+        flags = super().flags(index)
+        if not index.isValid():
+            return flags
+        file_info = self.fileInfo(index)
+        if file_info.isFile() and file_info.suffix() == "desktop":
+            return flags & ~Qt.ItemFlag.ItemIsEditable
+        return flags
 
 
 class MainWindow(QMainWindow):
@@ -45,24 +95,47 @@ class MainWindow(QMainWindow):
         self._launcher_service = launcher_service
         self._engine_registry = engine_registry
         self._preset_service = preset_service
-        self._icon_provider = QFileIconProvider()
         self._current_dir = self._workspace_service.ensure_workspace()
         self.setWindowTitle("DOS Machines")
         self.resize(960, 640)
 
-        self._view = QListWidget(self)
-        self._view.setViewMode(QListWidget.IconMode)
-        self._view.setMovement(QListWidget.Static)
-        self._view.setResizeMode(QListWidget.Adjust)
+        self._model = WorkspaceFileModel(self)
+        self._model.setReadOnly(False)
+        self._model.setRootPath(str(self._workspace_service.workspace_path))
+        self._model.setFilter(
+            self._model.filter()
+            | QDir.Filter.AllDirs
+            | QDir.Filter.Files
+            | QDir.Filter.Hidden
+            | QDir.Filter.NoDotAndDotDot
+        )
+        self._model.fileRenamed.connect(self._on_file_renamed)
+        self._view = WorkspaceFileView(self)
+        self._view.setViewMode(QListView.ViewMode.IconMode)
+        self._view.setMovement(QListView.Movement.Static)
+        self._view.setResizeMode(QListView.ResizeMode.Adjust)
         self._view.setIconSize(QSize(64, 64))
         self._view.setGridSize(QSize(120, 100))
         self._view.setWordWrap(True)
-        self._view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._view.setDragEnabled(True)
+        self._view.setAcceptDrops(True)
+        self._view.viewport().setAcceptDrops(True)
+        self._view.setDropIndicatorShown(True)
+        self._view.setDragDropMode(QListView.DragDropMode.DragDrop)
+        self._view.setDragDropOverwriteMode(False)
+        self._view.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._view.setEditTriggers(
+            QListView.EditTrigger.EditKeyPressed
+        )
+        self._view.setModel(self._model)
+        self._view.setRootIndex(self._model.index(str(self._current_dir)))
+        self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
-        self._view.itemActivated.connect(self._activate_item)
+        self._view.activated.connect(self._activate_index)
         self.setCentralWidget(self._view)
 
         self._build_menus()
+        self._build_toolbar()
         self._refresh()
 
     def _build_menus(self) -> None:
@@ -71,6 +144,10 @@ class MainWindow(QMainWindow):
         choose_workspace = QAction("Choose Workspace…", self)
         choose_workspace.triggered.connect(self._choose_workspace)
         file_menu.addAction(choose_workspace)
+
+        up_action = QAction("Up", self)
+        up_action.triggered.connect(self._go_up)
+        file_menu.addAction(up_action)
 
         new_folder = QAction("New Folder", self)
         new_folder.triggered.connect(self._create_folder)
@@ -84,25 +161,20 @@ class MainWindow(QMainWindow):
         refresh.triggered.connect(self._refresh)
         file_menu.addAction(refresh)
 
+    def _build_toolbar(self) -> None:
+        toolbar = self.addToolBar("Navigation")
+        toolbar.setMovable(False)
+
+        up_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogToParent), "Up", self)
+        up_action.triggered.connect(self._go_up)
+        toolbar.addAction(up_action)
+
     def _refresh(self) -> None:
         workspace = self._workspace_service.ensure_workspace()
         if not self._current_dir.exists():
             self._current_dir = workspace
-        self._view.clear()
-        if self._current_dir != workspace:
-            self._add_item(UP_MARKER, self._current_dir.parent, is_dir=True)
-        for child in sorted(self._current_dir.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower())):
-            self._add_item(child.name, child, is_dir=child.is_dir())
+        self._view.setRootIndex(self._model.index(str(self._current_dir)))
         self.statusBar().showMessage(str(self._current_dir))
-
-    def _add_item(self, label: str, path: Path, is_dir: bool) -> None:
-        item = QListWidgetItem(label)
-        item.setData(Qt.ItemDataRole.UserRole, str(path))
-        icon_source = self._icon_provider.icon(
-            QFileIconProvider.IconType.Folder if is_dir else QFileInfo(str(path))
-        )
-        item.setIcon(icon_source)
-        self._view.addItem(item)
 
     def _choose_workspace(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Workspace")
@@ -110,6 +182,14 @@ class MainWindow(QMainWindow):
             return
         self._workspace_service.set_workspace(Path(path))
         self._current_dir = self._workspace_service.workspace_path
+        self._model.setRootPath(str(self._current_dir))
+        self._refresh()
+
+    def _go_up(self) -> None:
+        workspace = self._workspace_service.workspace_path
+        if self._current_dir == workspace:
+            return
+        self._current_dir = self._current_dir.parent
         self._refresh()
 
     def _create_folder(self) -> None:
@@ -127,7 +207,7 @@ class MainWindow(QMainWindow):
             self._current_dir,
             self._engine_registry,
             self._preset_service,
-            self,
+            parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -147,28 +227,42 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _open_context_menu(self, point) -> None:
-        item = self._view.itemAt(point)
-        path = Path(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
+        index = self._view.indexAt(point)
+        path = Path(self._model.filePath(index)) if index.isValid() else None
         menu = QMenu(self)
         if path is not None and path.suffix == ".desktop":
             launch_action = menu.addAction("Launch")
-            launch_action.triggered.connect(lambda: self._activate_item(item))
+            launch_action.triggered.connect(lambda: self._activate_index(index))
             configure_action = menu.addAction("Configure Machine")
             configure_action.triggered.connect(lambda: self._configure_launcher(path))
+            rename_action = menu.addAction("Rename Machine")
+            rename_action.triggered.connect(lambda: self._rename_launcher(path))
+            delete_action = menu.addAction("Delete Machine")
+            delete_action.triggered.connect(lambda: self._delete_machine(path))
+            menu.addSeparator()
+        elif path is not None:
+            if path.is_dir():
+                open_action = menu.addAction("Open Folder")
+                open_action.triggered.connect(lambda: self._open_directory(path))
+            rename_action = menu.addAction("Rename")
+            rename_action.triggered.connect(lambda: self._rename_entry(index))
+            trash_action = menu.addAction("Move to Trash")
+            trash_action.triggered.connect(lambda: self._move_entry_to_trash(path))
             menu.addSeparator()
         add_machine = menu.addAction("Add New Machine")
         add_machine.triggered.connect(self._add_machine)
         new_folder = menu.addAction("New Folder")
         new_folder.triggered.connect(self._create_folder)
+        up_action = menu.addAction("Up")
+        up_action.triggered.connect(self._go_up)
         refresh = menu.addAction("Refresh")
         refresh.triggered.connect(self._refresh)
         menu.exec(self._view.viewport().mapToGlobal(point))
 
-    def _activate_item(self, item: QListWidgetItem) -> None:
-        path = Path(item.data(Qt.ItemDataRole.UserRole))
+    def _activate_index(self, index) -> None:
+        path = Path(self._model.filePath(index))
         if path.is_dir():
-            self._current_dir = path
-            self._refresh()
+            self._open_directory(path)
             return
         if path.suffix != ".desktop":
             return
@@ -184,6 +278,10 @@ class MainWindow(QMainWindow):
             self._launcher_service.launch_launcher(path)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Launch Failed", str(exc))
+
+    def _open_directory(self, path: Path) -> None:
+        self._current_dir = path
+        self._refresh()
 
     def _configure_launcher(self, launcher_path: Path) -> None:
         entry = self._workspace_service.read_launcher_entry(launcher_path)
@@ -207,8 +305,118 @@ class MainWindow(QMainWindow):
         request = dialog.build_request()
         try:
             updated_profile = self._profile_service.create(request)
-            self._launcher_service.create_launcher(updated_profile, launcher_path.parent)
+            self._launcher_service.sync_launcher(updated_profile, launcher_path.parent, launcher_path)
+        except FileExistsError:
+            QMessageBox.warning(
+                self,
+                "Launcher Exists",
+                f"A machine named '{request.title}' already exists in this folder.",
+            )
+            return
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Save Failed", str(exc))
             return
         self._refresh()
+
+    def _rename_launcher(self, launcher_path: Path) -> None:
+        entry = self._workspace_service.read_launcher_entry(launcher_path)
+        if entry.profile_path is None or not entry.profile_path.exists():
+            QMessageBox.warning(self, "Broken Machine", f"Missing profile: {entry.profile_path}")
+            return
+        title, accepted = QInputDialog.getText(self, "Rename Machine", "Machine name", text=entry.title)
+        if not accepted:
+            return
+        new_title = title.strip()
+        if not new_title or new_title == entry.title:
+            return
+        try:
+            profile = self._profile_service.load(entry.profile_path)
+            request = self._build_profile_update_request(profile, launcher_path.parent, new_title)
+            updated_profile = self._profile_service.create(request)
+            self._launcher_service.sync_launcher(updated_profile, launcher_path.parent, launcher_path)
+        except FileExistsError:
+            QMessageBox.warning(
+                self,
+                "Launcher Exists",
+                f"A machine named '{new_title}' already exists in this folder.",
+            )
+            return
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Rename Failed", str(exc))
+            return
+        self._refresh()
+
+    def _delete_machine(self, launcher_path: Path) -> None:
+        entry = self._workspace_service.read_launcher_entry(launcher_path)
+        answer = QMessageBox.question(
+            self,
+            "Delete Machine",
+            f"Delete machine '{entry.title}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if entry.profile_path is not None and entry.profile_path.exists():
+                self._profile_service.delete(entry.profile_path)
+            if launcher_path.exists():
+                launcher_path.unlink()
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Delete Failed", str(exc))
+            return
+        self._refresh()
+
+    def _rename_entry(self, index) -> None:
+        if not index.isValid():
+            return
+        self._view.edit(index)
+
+    def _move_entry_to_trash(self, path: Path) -> None:
+        label = "folder" if path.is_dir() else "file"
+        answer = QMessageBox.question(
+            self,
+            "Move to Trash",
+            f"Move {label} '{path.name}' to Trash?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if not self._move_to_trash(path):
+                raise OSError(f"Could not move '{path}' to Trash.")
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Trash Failed", str(exc))
+            return
+        if self._current_dir == path:
+            self._current_dir = self._workspace_service.workspace_path
+        self._refresh()
+
+    def _move_to_trash(self, path: Path) -> bool:
+        return QFile.moveToTrash(str(path))
+
+    def _on_file_renamed(self, directory: str, old_name: str, new_name: str) -> None:
+        old_path = Path(directory) / old_name
+        if self._current_dir == old_path:
+            self._current_dir = Path(directory) / new_name
+            self._refresh()
+
+    def _build_profile_update_request(
+        self,
+        profile: MachineProfile,
+        workspace_dir: Path,
+        title: str,
+    ) -> CreateProfileRequest:
+        return CreateProfileRequest(
+            title=title,
+            game_dir=profile.game.game_dir,
+            executable=profile.game.executable,
+            engine_binary=profile.engine.binary_path,
+            workspace_dir=workspace_dir,
+            setup_executable=profile.game.setup_executable,
+            notes=profile.identity.notes,
+            option_states=profile.option_states,
+            autoexec_text=profile.autoexec_text,
+            existing_profile_path=profile.game.game_dir / ".dosmachines" / "profile.json",
+        )

@@ -112,6 +112,21 @@ class ProfileService:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
         return MachineProfile.from_json(payload)
 
+    def delete(self, profile_path: Path) -> None:
+        resolved_profile_path = profile_path.expanduser().resolve()
+        managed_dir = resolved_profile_path.parent
+        existing = self.load(resolved_profile_path) if resolved_profile_path.exists() else None
+        if resolved_profile_path.exists():
+            resolved_profile_path.unlink()
+        if existing is not None and existing.ui.icon_path is not None and existing.ui.icon_path.exists():
+            icon_path = existing.ui.icon_path.expanduser().resolve()
+            if icon_path.parent == managed_dir:
+                icon_path.unlink()
+        try:
+            managed_dir.rmdir()
+        except OSError:
+            pass
+
     def _build_identity(self, machine_id: str, title: str, notes: str):
         from dos_machines.domain.models import ProfileIdentity
 

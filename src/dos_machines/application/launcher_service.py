@@ -12,6 +12,35 @@ class LauncherService:
     def create_launcher(self, profile: MachineProfile, workspace_dir: Path) -> Path:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         launcher_path = workspace_dir / f"{profile.identity.title}.desktop"
+        return self._write_launcher(profile, launcher_path)
+
+    def sync_launcher(
+        self,
+        profile: MachineProfile,
+        workspace_dir: Path,
+        previous_launcher_path: Path | None = None,
+    ) -> Path:
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        launcher_path = workspace_dir / f"{profile.identity.title}.desktop"
+        if previous_launcher_path is not None:
+            previous_launcher_path = previous_launcher_path.expanduser().resolve()
+        if (
+            previous_launcher_path is not None
+            and previous_launcher_path.exists()
+            and previous_launcher_path != launcher_path
+            and launcher_path.exists()
+        ):
+            raise FileExistsError(f"Launcher already exists: {launcher_path}")
+        written_path = self._write_launcher(profile, launcher_path)
+        if (
+            previous_launcher_path is not None
+            and previous_launcher_path.exists()
+            and previous_launcher_path != written_path
+        ):
+            previous_launcher_path.unlink()
+        return written_path
+
+    def _write_launcher(self, profile: MachineProfile, launcher_path: Path) -> Path:
         config_path = profile.game.game_dir / ".dosmachines" / "dosbox.conf"
         working_dir = profile.game.game_dir / ".dosmachines"
         icon_path = profile.ui.icon_path

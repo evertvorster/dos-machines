@@ -130,3 +130,89 @@ def test_autoexec_defaults_are_backfilled_for_existing_profiles(tmp_path: Path) 
     )
     profile = profile_service.create(request)
     assert "PRINCE.EXE" in profile.autoexec_text
+
+
+def test_updating_existing_profile_changes_title_without_new_machine_id(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    option_states = {
+        section.name: {
+            option.name: OptionState(value=option.default_value, checked=True, origin="default")
+            for option in section.options
+        }
+        for section in schema.sections
+        if section.name != "autoexec"
+    }
+
+    original = profile_service.create(
+        CreateProfileRequest(
+            title="Old Name",
+            game_dir=tmp_path / "rename-me",
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states=option_states,
+        )
+    )
+
+    updated = profile_service.create(
+        CreateProfileRequest(
+            title="New Name",
+            game_dir=original.game.game_dir,
+            executable=original.game.executable,
+            engine_binary=original.engine.binary_path,
+            workspace_dir=tmp_path / "workspace",
+            option_states=original.option_states,
+            autoexec_text=original.autoexec_text,
+            existing_profile_path=original.game.game_dir / ".dosmachines" / "profile.json",
+        )
+    )
+
+    assert updated.identity.title == "New Name"
+    assert updated.identity.machine_id == original.identity.machine_id
+    reloaded = profile_service.load(original.game.game_dir / ".dosmachines" / "profile.json")
+    assert reloaded.identity.title == "New Name"
+
+
+def test_delete_profile_keeps_generated_config(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    option_states = {
+        section.name: {
+            option.name: OptionState(value=option.default_value, checked=True, origin="default")
+            for option in section.options
+        }
+        for section in schema.sections
+        if section.name != "autoexec"
+    }
+
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Delete Me",
+            game_dir=tmp_path / "delete-me",
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states=option_states,
+        )
+    )
+
+    managed_dir = profile.game.game_dir / ".dosmachines"
+    profile_path = managed_dir / "profile.json"
+    config_path = managed_dir / "dosbox.conf"
+
+    profile_service.delete(profile_path)
+
+    assert not profile_path.exists()
+    assert config_path.exists()
+    assert managed_dir.exists()

@@ -2,6 +2,39 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dos_machines.application.launcher_service import LauncherService
+from dos_machines.domain.models import (
+    EngineCapabilities,
+    EngineRef,
+    GameTargets,
+    MachineProfile,
+    PresetRef,
+    ProfileIdentity,
+    Provenance,
+    UiState,
+)
+
+
+def _profile(tmp_path: Path, title: str) -> MachineProfile:
+    game_dir = tmp_path / "games" / title.lower().replace(" ", "_")
+    managed_dir = game_dir / ".dosmachines"
+    managed_dir.mkdir(parents=True, exist_ok=True)
+    return MachineProfile(
+        identity=ProfileIdentity(machine_id="machine-1", title=title),
+        engine=EngineRef(
+            engine_id="engine-1",
+            binary_path=Path("/usr/bin/dosbox"),
+            display_name="DOSBox",
+            capabilities=EngineCapabilities(),
+        ),
+        preset=PresetRef(preset_id="blank", start_mode="blank"),
+        game=GameTargets(
+            game_dir=game_dir,
+            working_dir=game_dir,
+            executable="GAME.EXE",
+        ),
+        ui=UiState(),
+        provenance=Provenance(),
+    )
 
 
 def test_launch_launcher_runs_exec_in_desktop_entry_path(tmp_path: Path) -> None:
@@ -41,3 +74,21 @@ def test_launcher_without_exec_raises(tmp_path: Path) -> None:
         assert "Exec" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected ValueError for missing Exec")
+
+
+def test_sync_launcher_replaces_old_file_when_title_changes(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    service = LauncherService()
+
+    original = _profile(tmp_path, "Old Name")
+    old_launcher = service.create_launcher(original, workspace_dir)
+
+    renamed = _profile(tmp_path, "New Name")
+    renamed.identity.machine_id = original.identity.machine_id
+    renamed.game = original.game
+    new_launcher = service.sync_launcher(renamed, workspace_dir, old_launcher)
+
+    assert new_launcher == workspace_dir / "New Name.desktop"
+    assert new_launcher.exists()
+    assert not old_launcher.exists()
+    assert "Name=New Name" in new_launcher.read_text(encoding="utf-8")
