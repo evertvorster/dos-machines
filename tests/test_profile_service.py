@@ -129,7 +129,8 @@ def test_autoexec_defaults_are_backfilled_for_existing_profiles(tmp_path: Path) 
         },
     )
     profile = profile_service.create(request)
-    assert "PRINCE.EXE" in profile.autoexec_text
+    assert "mount c" in profile.autoexec_text
+    assert "PRINCE.EXE" not in profile.autoexec_text
 
 
 def test_updating_existing_profile_changes_title_without_new_machine_id(tmp_path: Path) -> None:

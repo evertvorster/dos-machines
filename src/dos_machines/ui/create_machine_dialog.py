@@ -438,9 +438,7 @@ class CreateMachineDialog(QDialog):
 
         self.title_edit = QLineEdit(profile.identity.title if profile else import_analysis.title if import_analysis else "")
         self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else str(import_analysis.game_dir) if import_analysis else "")
-        self.executable_edit = QLineEdit(profile.game.executable if profile else import_analysis.executable if import_analysis else "")
         self.engine_binary_edit = QLineEdit(str(profile.engine.binary_path) if profile else str(import_analysis.engine_binary) if import_analysis else "/usr/bin/dosbox")
-        self.setup_executable_edit = QLineEdit(profile.game.setup_executable or "" if profile else "")
 
         self._load_engine_button = QPushButton("Load Engine Schema")
         self._load_engine_button.clicked.connect(self._load_schema)
@@ -450,6 +448,9 @@ class CreateMachineDialog(QDialog):
         self._apply_machine_preset_button.clicked.connect(self._apply_machine_preset)
         self._config_preview = QTextEdit()
         self._config_preview.setReadOnly(True)
+
+        self.game_dir_edit.textChanged.connect(self._handle_metadata_changed)
+        self.engine_binary_edit.textChanged.connect(self._update_preview)
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_metadata_tab(), "Machine")
@@ -484,10 +485,10 @@ class CreateMachineDialog(QDialog):
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
             game_dir=Path(self.game_dir_edit.text().strip()).expanduser(),
-            executable=self.executable_edit.text().strip(),
+            executable=self._profile.game.executable if self._profile is not None else self._import_analysis.executable if self._import_analysis is not None else "",
             engine_binary=Path(self.engine_binary_edit.text().strip()).expanduser(),
             workspace_dir=self._workspace_dir,
-            setup_executable=self.setup_executable_edit.text().strip() or None,
+            setup_executable=self._profile.game.setup_executable if self._profile is not None else None,
             notes=notes,
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
@@ -502,8 +503,6 @@ class CreateMachineDialog(QDialog):
         form = QFormLayout()
         form.addRow("Title", self.title_edit)
         form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
-        form.addRow("Executable", self._with_browse(self.executable_edit, self._browse_executable))
-        form.addRow("Setup Executable", self._with_browse(self.setup_executable_edit, self._browse_setup_executable))
         form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
         form.addRow("", self._load_engine_button)
         layout.addLayout(form)
@@ -565,30 +564,6 @@ class CreateMachineDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary", self.engine_binary_edit.text().strip())
         if path:
             self.engine_binary_edit.setText(path)
-
-    def _browse_executable(self) -> None:
-        self._browse_relative_file(self.executable_edit, "Select Game Executable")
-
-    def _browse_setup_executable(self) -> None:
-        self._browse_relative_file(self.setup_executable_edit, "Select Setup Executable")
-
-    def _browse_relative_file(self, target_edit: QLineEdit, title: str) -> None:
-        start_dir = self.game_dir_edit.text().strip() or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(self, title, start_dir)
-        if not path:
-            return
-        selected = Path(path)
-        game_dir = self.game_dir_edit.text().strip()
-        if game_dir:
-            try:
-                relative = selected.relative_to(Path(game_dir))
-                target_edit.setText(str(relative).replace("/", "\\"))
-                self._update_preview()
-                return
-            except ValueError:
-                pass
-        target_edit.setText(selected.name)
-        self._update_preview()
 
     def _load_schema_from_profile(self) -> None:
         assert self._profile is not None
@@ -660,8 +635,8 @@ class CreateMachineDialog(QDialog):
                 GameTargets(
                     game_dir=game_dir,
                     working_dir=game_dir,
-                    executable=self.executable_edit.text().strip(),
-                    setup_executable=self.setup_executable_edit.text().strip() or None,
+                    executable="",
+                    setup_executable=None,
                 ),
                 binary_path,
             )
@@ -808,8 +783,8 @@ class CreateMachineDialog(QDialog):
             game=GameTargets(
                 game_dir=game_dir,
                 working_dir=game_dir,
-                executable=self.executable_edit.text().strip(),
-                setup_executable=self.setup_executable_edit.text().strip() or None,
+                executable=self._profile.game.executable if self._profile is not None else self._import_analysis.executable if self._import_analysis is not None else "",
+                setup_executable=self._profile.game.setup_executable if self._profile is not None else None,
             ),
             ui=ui_state,
             option_states=self._option_states,
@@ -856,7 +831,6 @@ class CreateMachineDialog(QDialog):
         self._option_states = latest.option_states
         self.title_edit.setText(latest.title)
         self.game_dir_edit.setText(str(latest.game_dir))
-        self.executable_edit.setText(latest.executable)
         self.engine_binary_edit.setText(str(latest.engine_binary))
         self._rebuild_sections_overview()
 
@@ -904,3 +878,6 @@ class CreateMachineDialog(QDialog):
         autoexec_default = self._preset_service.load_section_default(self._engine_id, "autoexec")
         if autoexec_default and "__text__" in autoexec_default:
             self._autoexec_text = autoexec_default["__text__"]
+
+    def _handle_metadata_changed(self) -> None:
+        self._update_preview()

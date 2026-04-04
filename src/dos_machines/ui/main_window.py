@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, QFile, QSize, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QDir, QFile, QRect, QSize, Qt
+from PySide6.QtGui import QAction, QFontMetrics, QTextLayout
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QFileSystemModel,
@@ -14,6 +15,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
 )
 
 from dos_machines.application.engine_registry import EngineRegistry
@@ -103,6 +106,69 @@ class WorkspaceFileModel(QFileSystemModel):
         return flags
 
 
+class WorkspaceItemDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index) -> None:
+        view_option = QStyleOptionViewItem(option)
+        self.initStyleOption(view_option, index)
+        style = view_option.widget.style() if view_option.widget is not None else QApplication.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, view_option, painter, view_option.widget)
+
+        icon_size = view_option.decorationSize
+        icon_rect = QRect(
+            view_option.rect.x() + (view_option.rect.width() - icon_size.width()) // 2,
+            view_option.rect.y() + 4,
+            icon_size.width(),
+            icon_size.height(),
+        )
+        if not view_option.icon.isNull():
+            mode = QStyle.StateFlag.State_Enabled
+            if not view_option.state & QStyle.StateFlag.State_Enabled:
+                mode = QStyle.StateFlag.State_None
+            view_option.icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter, mode=view_option.icon.Mode.Normal)
+
+        text_rect = QRect(
+            view_option.rect.x() + 4,
+            icon_rect.bottom() + 6,
+            view_option.rect.width() - 8,
+            max(0, view_option.rect.height() - icon_rect.height() - 10),
+        )
+        if text_rect.height() <= 0:
+            return
+
+        color = view_option.palette.highlightedText().color() if view_option.state & QStyle.StateFlag.State_Selected else view_option.palette.text().color()
+        painter.save()
+        painter.setPen(color)
+        self._draw_wrapped_text(painter, text_rect, view_option.text, view_option.fontMetrics)
+        painter.restore()
+
+    def _draw_wrapped_text(self, painter, rect: QRect, text: str, metrics: QFontMetrics) -> None:
+        layout = QTextLayout(text, painter.font())
+        layout.beginLayout()
+        lines: list[tuple[str, int]] = []
+        max_lines = 3
+        while len(lines) < max_lines:
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(rect.width())
+            start = line.textStart()
+            length = line.textLength()
+            lines.append((text[start:start + length], start + length))
+        layout.endLayout()
+
+        if not lines:
+            return
+
+        if lines[-1][1] < len(text):
+            lines[-1] = (metrics.elidedText(text[lines[-1][1] - len(lines[-1][0]):], Qt.TextElideMode.ElideRight, rect.width()), len(text))
+
+        line_height = metrics.lineSpacing()
+        y = rect.y()
+        for line_text, _ in lines:
+            painter.drawText(QRect(rect.x(), y, rect.width(), line_height), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, line_text)
+            y += line_height
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -154,6 +220,7 @@ class MainWindow(QMainWindow):
         self._view.setEditTriggers(
             QListView.EditTrigger.EditKeyPressed
         )
+        self._view.setItemDelegate(WorkspaceItemDelegate(self._view))
         self._view.setModel(self._model)
         self._view.setRootIndex(self._model.index(str(self._current_dir)))
         self._view.set_import_handler(self._import_paths)

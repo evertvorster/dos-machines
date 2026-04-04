@@ -42,17 +42,16 @@ def test_new_machine_applies_engine_scoped_section_defaults(tmp_path: Path) -> N
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
     preset_service.save_section_default(cache.ref.engine_id, "sdl", {"fullscreen": "true"})
-    preset_service.save_section_default(cache.ref.engine_id, "autoexec", {"__text__": "mount c \".\"\nc:\nGAME.EXE"})
+    preset_service.save_section_default(cache.ref.engine_id, "autoexec", {"__text__": "mount c \".\"\nc:"})
 
     dialog = CreateMachineDialog(tmp_path / "workspace", engine_registry, preset_service)
     dialog.engine_binary_edit.setText(str(binary))
     dialog.game_dir_edit.setText(str(tmp_path / "game"))
-    dialog.executable_edit.setText("GAME.EXE")
     dialog._load_schema()
 
     assert dialog._option_states["sdl"]["fullscreen"].value == "true"
     assert dialog._option_states["sdl"]["fullscreen"].origin == "default-preset"
-    assert dialog._autoexec_text == 'mount c "."\nc:\nGAME.EXE'
+    assert dialog._autoexec_text == 'mount c "."\nc:'
 
 
 def test_existing_machine_does_not_apply_engine_scoped_section_defaults(tmp_path: Path) -> None:

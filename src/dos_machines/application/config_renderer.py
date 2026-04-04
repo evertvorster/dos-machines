@@ -61,10 +61,7 @@ class ConfigRenderer:
         return self.default_autoexec_text(profile.game, profile.engine.binary_path)
 
     def default_autoexec_text(self, game: GameTargets, engine_binary: Path | None = None) -> str:
-        lines = self._default_autoexec_prefix(game, engine_binary)
-        if game.executable:
-            lines.append(game.executable)
-        return "\n".join(lines)
+        return "\n".join(self._default_autoexec_prefix(game, engine_binary))
 
     def _default_autoexec_prefix(self, game: GameTargets, engine_binary: Path | None) -> list[str]:
         if engine_binary is not None and detect_engine_family_from_name(engine_binary) == ENGINE_FAMILY_DOSBOX_X:
