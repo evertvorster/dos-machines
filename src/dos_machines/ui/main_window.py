@@ -343,7 +343,7 @@ class WorkspaceItemDelegate(QStyledItemDelegate):
 
 class MainWindow(QMainWindow):
     _MIN_ICON_SIZE = 32
-    _MAX_ICON_SIZE = 128
+    _MAX_ICON_SIZE = 256
 
     def __init__(
         self,

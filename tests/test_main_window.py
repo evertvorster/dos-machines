@@ -62,6 +62,16 @@ def test_main_window_resize_icons_persists_setting(tmp_path: Path) -> None:
     assert settings_service.load().workspace_icon_size == 72
 
 
+def test_main_window_resize_icons_clamps_to_new_maximum(tmp_path: Path) -> None:
+    window, settings_service = _main_window(tmp_path)
+
+    for _ in range(40):
+        window._resize_icons(120)
+
+    assert window._view.iconSize().width() == 256
+    assert settings_service.load().workspace_icon_size == 256
+
+
 def test_main_window_inherits_application_icon(tmp_path: Path) -> None:
     app = _app()
     original_icon = app.windowIcon()
