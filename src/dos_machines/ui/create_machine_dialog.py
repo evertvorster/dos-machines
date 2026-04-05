@@ -41,9 +41,6 @@ from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState
 
 class NoWheelMixin:
     def wheelEvent(self, event) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
-            return
         event.ignore()
 
 
