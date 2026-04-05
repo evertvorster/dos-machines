@@ -55,6 +55,9 @@ class ProfileService:
         managed_dir = self.managed_dir(game_dir)
         return managed_dir / MANAGED_CONFIG_FILENAME
 
+    def media_dir_for_game(self, game_dir: Path) -> Path:
+        return self.managed_dir(game_dir) / "media"
+
     def existing_profile(self, game_dir: Path) -> MachineProfile | None:
         profile_path = self.profile_path_for_game(game_dir)
         return self.load(profile_path) if profile_path.exists() else None

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import shlex
+import shutil
+import subprocess
 
 from PySide6.QtCore import QAbstractListModel, QDir, QFile, QModelIndex, QMimeData, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QFontMetrics, QIcon, QTextLayout
@@ -617,6 +619,8 @@ class MainWindow(QMainWindow):
         if path is not None and path.suffix == ".desktop":
             launch_action = menu.addAction("Launch")
             launch_action.triggered.connect(lambda: self._activate_index(index))
+            media_action = menu.addAction("Media")
+            media_action.triggered.connect(lambda: self._open_machine_media(path))
             configure_action = menu.addAction("Configure Machine")
             configure_action.triggered.connect(lambda: self._configure_launcher(path))
             rename_action = menu.addAction("Rename Machine")
@@ -735,6 +739,29 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save Failed", str(exc))
             return
         self._refresh()
+
+    def _open_machine_media(self, launcher_path: Path) -> None:
+        entry = self._workspace_service.read_launcher_entry(launcher_path)
+        if entry.profile_path is None or not entry.profile_path.exists():
+            QMessageBox.warning(self, "Broken Machine", f"Missing profile: {entry.profile_path}")
+            return
+        media_dir = self._profile_service.media_dir_for_game(entry.profile_path.parent.parent)
+        media_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._launch_media_manager(media_dir)
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Open Media Failed", str(exc))
+
+    def _launch_media_manager(self, media_dir: Path) -> None:
+        dolphin = shutil.which("dolphin")
+        if dolphin:
+            subprocess.Popen([dolphin, str(media_dir)], start_new_session=True)
+            return
+        opener = shutil.which("xdg-open")
+        if opener:
+            subprocess.Popen([opener, str(media_dir)], start_new_session=True)
+            return
+        raise FileNotFoundError("Could not find Dolphin or xdg-open to open the media folder.")
 
     def _infer_game_dir_from_entry(self, entry) -> Path | None:
         if entry.profile_path is not None:
