@@ -1,7 +1,8 @@
 from pathlib import Path
 import stat
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 
 from dos_machines.application.config_renderer import ConfigRenderer
@@ -10,7 +11,7 @@ from dos_machines.application.profile_service import CreateProfileRequest, Profi
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import OptionState, SchemaOption, SchemaSection
-from dos_machines.ui.create_machine_dialog import CollapsibleHelpWidget, CreateMachineDialog, SectionEditorDialog
+from dos_machines.ui.create_machine_dialog import CollapsibleHelpWidget, CreateMachineDialog, NoWheelComboBox, SectionEditorDialog
 
 
 def _fake_binary(path: Path, version_output: str = "dosbox-staging, version 0.82.2") -> Path:
@@ -250,3 +251,26 @@ def test_section_editor_keeps_single_line_help_expanded(tmp_path: Path) -> None:
     assert dialog.findChildren(CollapsibleHelpWidget) == []
     assert dialog.findChildren(QToolButton) == []
     assert "Type of CPU emulation core to use." in [label.text() for label in dialog.findChildren(QLabel)]
+
+
+def test_no_wheel_combo_box_never_changes_value() -> None:
+    app = _app()
+    combo = NoWheelComboBox()
+    combo.addItems(["auto", "dynamic", "normal"])
+    combo.setCurrentText("dynamic")
+    combo.setFocus()
+
+    event = QWheelEvent(
+        QPointF(5, 5),
+        QPointF(5, 5),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(combo, event)
+
+    assert combo.currentText() == "dynamic"
+    assert not event.isAccepted()
