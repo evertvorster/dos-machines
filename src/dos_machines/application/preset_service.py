@@ -37,12 +37,18 @@ class PresetService:
     def save_section_preset(self, title: str, section_name: str, values: dict[str, str]) -> SectionPreset:
         payload = self._load_payload()
         presets = [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
+        existing = next(
+            (preset for preset in presets if preset.title == title and preset.section_name == section_name),
+            None,
+        )
         preset = SectionPreset(
-            preset_id=f"section-{uuid4().hex[:12]}",
+            preset_id=existing.preset_id if existing is not None else f"section-{uuid4().hex[:12]}",
             title=title,
             section_name=section_name,
             sections={section_name: dict(values)},
         )
+        if existing is not None:
+            presets = [item for item in presets if item.preset_id != existing.preset_id]
         presets.append(preset)
         payload["section_presets"] = [item.to_json() for item in presets]
         self._persist(payload)
@@ -56,6 +62,16 @@ class PresetService:
         payload = self._load_payload()
         section_presets = [SectionPreset.from_json(item) for item in payload.get("section_presets", [])]
         machine_presets = [MachinePreset.from_json(item) for item in payload.get("machine_presets", [])]
+        existing_machine = next((preset for preset in machine_presets if preset.title == title), None)
+        if existing_machine is not None:
+            section_presets = [
+                preset for preset in section_presets
+                if preset.preset_id not in existing_machine.section_preset_ids
+            ]
+            machine_presets = [
+                preset for preset in machine_presets
+                if preset.preset_id != existing_machine.preset_id
+            ]
         section_preset_ids: list[str] = []
         for section_name, values in section_values.items():
             section_preset = SectionPreset(
@@ -68,7 +84,7 @@ class PresetService:
             section_preset_ids.append(section_preset.preset_id)
 
         machine_preset = MachinePreset(
-            preset_id=f"machine-{uuid4().hex[:12]}",
+            preset_id=existing_machine.preset_id if existing_machine is not None else f"machine-{uuid4().hex[:12]}",
             title=title,
             section_preset_ids=section_preset_ids,
         )

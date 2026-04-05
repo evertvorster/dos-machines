@@ -345,7 +345,12 @@ class SectionEditorDialog(QDialog):
         self._rebuild_cards()
 
     def _save_section_preset(self) -> None:
-        title, accepted = QInputDialog.getText(self, "Save Section Preset", "Preset name")
+        titles = sorted(
+            preset.title
+            for preset in self._preset_service.load_section_presets()
+            if preset.section_name == self._section.name
+        )
+        title, accepted = QInputDialog.getItem(self, "Save Section Preset", "Preset name", titles, 0, True)
         if not accepted or not title.strip():
             return
         values = {
@@ -445,7 +450,12 @@ class AutoexecEditorDialog(QDialog):
         self._editor.setPlainText(preset.sections.get("autoexec", {}).get("__text__", ""))
 
     def _save_section_preset(self) -> None:
-        title, accepted = QInputDialog.getText(self, "Save Section Preset", "Preset name")
+        titles = sorted(
+            preset.title
+            for preset in self._preset_service.load_section_presets()
+            if preset.section_name == "autoexec"
+        )
+        title, accepted = QInputDialog.getItem(self, "Save Section Preset", "Preset name", titles, 0, True)
         if not accepted or not title.strip():
             return
         self._preset_service.save_section_preset(title.strip(), "autoexec", {"__text__": self.autoexec_text})
@@ -852,7 +862,8 @@ class CreateMachineDialog(QDialog):
     def _save_machine_preset(self) -> None:
         if self._schema is None:
             return
-        title, accepted = QInputDialog.getText(self, "Save Machine Preset", "Preset name")
+        titles = sorted(preset.title for preset in self._preset_service.load_machine_presets())
+        title, accepted = QInputDialog.getItem(self, "Save Machine Preset", "Preset name", titles, 0, True)
         if not accepted or not title.strip():
             return
         values = {
