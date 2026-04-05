@@ -65,6 +65,6 @@ class ConfigRenderer:
     def _default_autoexec_prefix(self, game: GameTargets, engine_binary: Path | None) -> list[str]:
         return [
             "# Lines in this section are run at startup.",
-            'mount c ".."',
-            "c:",
+            '@mount c ".."',
+            "@c:",
         ]

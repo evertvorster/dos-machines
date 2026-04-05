@@ -63,6 +63,7 @@ def test_analyse_general_config_preserves_autoexec_and_unknown_sections(tmp_path
     assert analysis.game_dir == config_path.parent
     assert analysis.executable == "KEEN4E.EXE"
     assert analysis.autoexec_text.endswith("KEEN4E.EXE")
+    assert 'mount c ".."' in analysis.autoexec_text
     assert analysis.option_states["sdl"]["fullscreen"].value == "true"
     assert analysis.option_states["sdl"]["fullscreen"].checked is True
     assert analysis.raw_overrides == {"custom": {"foo": "bar"}}

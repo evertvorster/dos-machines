@@ -162,8 +162,8 @@ def test_autoexec_defaults_are_backfilled_for_existing_profiles(tmp_path: Path) 
     )
     profile = profile_service.create(request)
     assert "mount c" in profile.autoexec_text
-    assert 'mount c ".."' in profile.autoexec_text
-    assert "c:" in profile.autoexec_text
+    assert '@mount c ".."' in profile.autoexec_text
+    assert "@c:" in profile.autoexec_text
     assert "PRINCE.EXE" not in profile.autoexec_text
 
 

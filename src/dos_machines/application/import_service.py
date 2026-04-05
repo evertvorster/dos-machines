@@ -155,7 +155,7 @@ class ImportService:
                         )
                     )
 
-        autoexec_text = "" if is_managed else "\n".join(autoexec_lines).strip()
+        autoexec_text = "" if is_managed else self._normalize_imported_autoexec_text(autoexec_lines)
         return ImportAnalysis(
             config_path=config_path,
             is_managed_config=is_managed,
@@ -245,6 +245,17 @@ class ImportService:
                 continue
             return line
         return ""
+
+    def _normalize_imported_autoexec_text(self, autoexec_lines: list[str]) -> str:
+        normalized_lines: list[str] = []
+        for raw_line in autoexec_lines:
+            stripped = raw_line.strip()
+            lowered = stripped.lower()
+            if lowered in {'mount c "."', '@mount c "."'}:
+                normalized_lines.append('@mount c ".."' if stripped.startswith("@") else 'mount c ".."')
+                continue
+            normalized_lines.append(raw_line)
+        return "\n".join(normalized_lines).strip()
 
     def _validate_option_value(self, section_name, option, imported_value: str) -> ImportIssue | None:
         lowered = imported_value.lower()
