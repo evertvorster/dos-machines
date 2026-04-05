@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -140,6 +141,54 @@ class FlowLayout(QLayout):
         return y + line_height - rect.y() + margins.bottom()
 
 
+class CollapsibleHelpWidget(QWidget):
+    def __init__(self, formatted_lines: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self._formatted_lines = formatted_lines
+        self._expanded = False
+
+        self._preview_label = QLabel()
+        self._preview_label.setWordWrap(True)
+        self._preview_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._preview_label.setTextFormat(Qt.TextFormat.RichText)
+
+        self._toggle_button = QToolButton()
+        self._toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self._toggle_button.setAutoRaise(True)
+        self._toggle_button.clicked.connect(self._toggle_expanded)
+
+        self._details_label = QLabel()
+        self._details_label.setWordWrap(True)
+        self._details_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._details_label.setTextFormat(Qt.TextFormat.RichText)
+        self._details_label.hide()
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.addWidget(self._preview_label, 1)
+        header_layout.addWidget(self._toggle_button, 0, Qt.AlignmentFlag.AlignTop)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(header_layout)
+        layout.addWidget(self._details_label)
+
+        self._sync_state()
+
+    def _toggle_expanded(self) -> None:
+        self._expanded = not self._expanded
+        self._sync_state()
+
+    def _sync_state(self) -> None:
+        self._preview_label.setText(self._formatted_lines[0])
+        self._toggle_button.setArrowType(Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow)
+        if self._expanded and len(self._formatted_lines) > 1:
+            self._details_label.setText("<br>".join(self._formatted_lines[1:]))
+            self._details_label.show()
+        else:
+            self._details_label.hide()
+
+
 class SectionEditorDialog(QDialog):
     def __init__(
         self,
@@ -226,12 +275,16 @@ class SectionEditorDialog(QDialog):
         layout.addWidget(editor)
 
         if option.help_text:
-            help_label = QLabel(option.help_text)
-            help_label.setWordWrap(True)
-            help_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            help_label.setTextFormat(Qt.TextFormat.RichText)
-            help_label.setText(self._format_help_text(option.help_text))
-            layout.addWidget(help_label)
+            formatted_lines = self._format_help_lines(option.help_text)
+            if len(formatted_lines) > 1:
+                layout.addWidget(CollapsibleHelpWidget(formatted_lines, box))
+            else:
+                help_label = QLabel(option.help_text)
+                help_label.setWordWrap(True)
+                help_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                help_label.setTextFormat(Qt.TextFormat.RichText)
+                help_label.setText(formatted_lines[0])
+                layout.addWidget(help_label)
 
         return box
 
@@ -317,12 +370,11 @@ class SectionEditorDialog(QDialog):
         self._preset_service.save_section_default(self._engine_id, self._section.name, values)
         QMessageBox.information(self, "Default Saved", f"Saved default for section '{self._section.name}'.")
 
-    def _format_help_text(self, text: str) -> str:
+    def _format_help_lines(self, text: str) -> list[str]:
         lines: list[str] = []
         for index, raw_line in enumerate(text.splitlines()):
             stripped = raw_line.strip()
             if not stripped:
-                lines.append("")
                 continue
             if self._looks_like_option_line(stripped):
                 prefix, suffix = stripped.split(":", 1)
@@ -332,7 +384,10 @@ class SectionEditorDialog(QDialog):
                 if index > 0:
                     escaped = f"{'&nbsp;' * 4}{escaped}"
             lines.append(escaped)
-        return "<br>".join(lines)
+        return lines
+
+    def _format_help_text(self, text: str) -> str:
+        return "<br>".join(self._format_help_lines(text))
 
     def _looks_like_option_line(self, line: str) -> bool:
         if line.startswith(("Possible values:", "Deprecated values:", "Notes:", "Note:")):

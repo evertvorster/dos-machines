@@ -59,3 +59,16 @@ def test_main_window_resize_icons_persists_setting(tmp_path: Path) -> None:
 
     assert window._view.iconSize().width() == 72
     assert settings_service.load().workspace_icon_size == 72
+
+
+def test_main_window_inherits_application_icon(tmp_path: Path) -> None:
+    app = _app()
+    original_icon = app.windowIcon()
+    test_icon = app.style().standardIcon(app.style().StandardPixmap.SP_ComputerIcon)
+    app.setWindowIcon(test_icon)
+    try:
+        window, _ = _main_window(tmp_path)
+        assert not window.windowIcon().isNull()
+        assert window.windowIcon().cacheKey() == test_icon.cacheKey()
+    finally:
+        app.setWindowIcon(original_icon)

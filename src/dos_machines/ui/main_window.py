@@ -357,6 +357,9 @@ class MainWindow(QMainWindow):
         self._preset_service = preset_service
         self._settings = self._settings_service.load()
         self._current_dir = self._workspace_service.ensure_workspace()
+        app_icon = QApplication.windowIcon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
         self.setWindowTitle("DOS Machines")
         self.resize(960, 640)
 

@@ -1,15 +1,16 @@
 from pathlib import Path
 import stat
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
-from dos_machines.domain.models import OptionState
-from dos_machines.ui.create_machine_dialog import CreateMachineDialog
+from dos_machines.domain.models import OptionState, SchemaOption, SchemaSection
+from dos_machines.ui.create_machine_dialog import CollapsibleHelpWidget, CreateMachineDialog, SectionEditorDialog
 
 
 def _fake_binary(path: Path, version_output: str = "dosbox-staging, version 0.82.2") -> Path:
@@ -154,3 +155,98 @@ def test_existing_profile_does_not_resubmit_current_icon_as_new_source(tmp_path:
 
     assert request.icon_source is None
     assert request.remove_icon is False
+
+
+def test_section_editor_collapses_multiline_help_by_default(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    section = SchemaSection(
+        name="cpu",
+        options=[
+            SchemaOption(
+                section="cpu",
+                name="core",
+                default_value="auto",
+                value_type="enum",
+                description="",
+                help_text="Type of CPU emulation core to use.\nauto: The default mode.\nPossible values: auto, dynamic",
+                choices=["auto", "dynamic"],
+            )
+        ],
+    )
+    option_states = {"core": OptionState(value="auto", checked=False, origin="default")}
+
+    dialog = SectionEditorDialog(section, option_states, preset_service)
+
+    widgets = dialog.findChildren(CollapsibleHelpWidget)
+
+    assert len(widgets) == 1
+    assert widgets[0]._preview_label.text() == "Type of CPU emulation core to use."
+    assert widgets[0]._details_label.isHidden()
+    assert widgets[0]._toggle_button.arrowType() == Qt.ArrowType.RightArrow
+
+
+def test_section_editor_expands_and_collapses_multiline_help(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    section = SchemaSection(
+        name="cpu",
+        options=[
+            SchemaOption(
+                section="cpu",
+                name="core",
+                default_value="auto",
+                value_type="enum",
+                description="",
+                help_text="Type of CPU emulation core to use.\nauto: The default mode.\nPossible values: auto, dynamic",
+                choices=["auto", "dynamic"],
+            )
+        ],
+    )
+    option_states = {"core": OptionState(value="auto", checked=False, origin="default")}
+
+    dialog = SectionEditorDialog(section, option_states, preset_service)
+    widget = dialog.findChildren(CollapsibleHelpWidget)[0]
+
+    widget._toggle_button.click()
+
+    assert not widget._details_label.isHidden()
+    assert widget._toggle_button.arrowType() == Qt.ArrowType.DownArrow
+    assert widget._details_label.text() == "<b>auto:</b> The default mode.<br><b>Possible values:</b> auto, dynamic"
+
+    widget._toggle_button.click()
+
+    assert widget._details_label.isHidden()
+    assert widget._toggle_button.arrowType() == Qt.ArrowType.RightArrow
+
+
+def test_section_editor_keeps_single_line_help_expanded(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    section = SchemaSection(
+        name="cpu",
+        options=[
+            SchemaOption(
+                section="cpu",
+                name="core",
+                default_value="auto",
+                value_type="enum",
+                description="",
+                help_text="Type of CPU emulation core to use.",
+                choices=["auto", "dynamic"],
+            )
+        ],
+    )
+    option_states = {"core": OptionState(value="auto", checked=False, origin="default")}
+
+    dialog = SectionEditorDialog(section, option_states, preset_service)
+
+    assert dialog.findChildren(CollapsibleHelpWidget) == []
+    assert dialog.findChildren(QToolButton) == []
+    assert "Type of CPU emulation core to use." in [label.text() for label in dialog.findChildren(QLabel)]
