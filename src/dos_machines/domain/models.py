@@ -394,4 +394,7 @@ class WorkspaceEntry:
     profile_path: Path | None
     machine_id: str | None
     icon_path: Path | None = None
+    icon_name: str | None = None
+    working_dir: Path | None = None
+    exec_value: str | None = None
     broken: bool = False

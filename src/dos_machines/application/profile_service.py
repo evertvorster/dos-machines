@@ -110,7 +110,7 @@ class ProfileService:
             shutil.copyfile(request.icon_source, icon_target)
             profile.ui.icon_path = icon_target
         elif existing is not None and existing.ui.icon_path is not None:
-            profile.ui.icon_path = existing.ui.icon_path
+            profile.ui.icon_path = self._resolve_existing_icon_path(existing.ui.icon_path, managed_dir)
 
         self.save(profile)
         return profile
@@ -147,6 +147,20 @@ class ProfileService:
         resolved = icon_path.expanduser().resolve()
         if resolved.parent == managed_dir and resolved.exists():
             resolved.unlink()
+
+    def _resolve_existing_icon_path(self, icon_path: Path, managed_dir: Path) -> Path | None:
+        resolved = icon_path.expanduser()
+        candidate = managed_dir / resolved.name
+        if resolved.parent != managed_dir and candidate.exists():
+            return candidate
+        if resolved.exists():
+            return resolved
+        if candidate.exists():
+            return candidate
+        managed_icons = sorted(managed_dir.glob("icon.*"))
+        if managed_icons:
+            return managed_icons[0]
+        return None
 
     def _build_identity(self, machine_id: str, title: str, notes: str):
         from dos_machines.domain.models import ProfileIdentity

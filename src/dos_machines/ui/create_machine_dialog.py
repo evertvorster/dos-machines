@@ -35,6 +35,7 @@ from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.import_service import ImportAnalysis, ImportIssue, ImportService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
+from dos_machines.application.profile_service import ProfileService
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState, SchemaOption, SchemaSection
 
@@ -468,6 +469,8 @@ class CreateMachineDialog(QDialog):
         profile: MachineProfile | None = None,
         import_service: ImportService | None = None,
         import_analysis: ImportAnalysis | None = None,
+        profile_service: ProfileService | None = None,
+        recovery_mode: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -477,10 +480,14 @@ class CreateMachineDialog(QDialog):
         self._settings_service = settings_service
         self._engine_registry = engine_registry
         self._preset_service = preset_service
+        self._profile_service = profile_service
         self._import_service = import_service
         self._import_analysis = import_analysis
+        self._recovery_mode = recovery_mode
         self._renderer = ConfigRenderer()
         self._profile = profile
+        self._recovered_profile_path: Path | None = None
+        self._recovered_config_path: Path | None = None
         self._schema: EngineSchema | None = None
         self._engine_id: str | None = None
         self._option_states: dict[str, dict[str, OptionState]] = {}
@@ -553,12 +560,15 @@ class CreateMachineDialog(QDialog):
             self._reanalyse_raw_import()
         existing_profile_path = None
         notes = ""
-        if self._profile is not None:
+        current_game_dir = Path(self.game_dir_edit.text().strip()).expanduser()
+        if self._profile is not None and self._profile.game.game_dir == current_game_dir:
             existing_profile_path = self._profile.game.game_dir / ".dosmachines" / "profile.json"
             notes = self._profile.identity.notes
+        elif self._recovered_profile_path is not None and self._recovered_profile_path.exists():
+            existing_profile_path = self._recovered_profile_path
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
-            game_dir=Path(self.game_dir_edit.text().strip()).expanduser(),
+            game_dir=current_game_dir,
             executable=self._profile.game.executable if self._profile is not None else self._import_analysis.executable if self._import_analysis is not None else "",
             engine_binary=Path(self.engine_binary_edit.text().strip()).expanduser(),
             workspace_dir=self._workspace_dir,
@@ -999,7 +1009,76 @@ class CreateMachineDialog(QDialog):
             self._autoexec_text = autoexec_default["__text__"]
 
     def _handle_metadata_changed(self) -> None:
+        if self._recovery_mode:
+            self._hydrate_recovery_source()
         self._update_preview()
+
+    def _hydrate_recovery_source(self) -> None:
+        if self._profile_service is None:
+            return
+        game_dir_text = self.game_dir_edit.text().strip()
+        if not game_dir_text:
+            return
+        game_dir = Path(game_dir_text).expanduser()
+        profile_path = game_dir / ".dosmachines" / "profile.json"
+        config_path = game_dir / ".dosmachines" / "dosbox.conf"
+        if self._recovered_profile_path == profile_path or self._recovered_config_path == config_path:
+            return
+        self._recovered_profile_path = None
+        self._recovered_config_path = None
+        if profile_path.exists():
+            self._hydrate_from_profile_path(profile_path)
+            return
+        if config_path.exists() and self._import_service is not None:
+            self._hydrate_from_config_path(config_path)
+            return
+        self._profile = None
+        self._import_analysis = None
+
+    def _hydrate_from_profile_path(self, profile_path: Path) -> None:
+        try:
+            profile = self._profile_service.load(profile_path)
+        except Exception:
+            return
+        actual_game_dir = profile_path.parent.parent
+        original_game_dir = profile.game.game_dir
+        original_working_dir = profile.game.working_dir
+        profile.game.game_dir = actual_game_dir
+        if original_working_dir == original_game_dir:
+            profile.game.working_dir = actual_game_dir
+        managed_dir = actual_game_dir / ".dosmachines"
+        if profile.ui.icon_path is not None and not profile.ui.icon_path.exists():
+            candidate_icons = sorted(managed_dir.glob("icon.*"))
+            profile.ui.icon_path = candidate_icons[0] if candidate_icons else None
+        self._profile = profile
+        self._import_analysis = None
+        self._recovered_profile_path = profile_path
+        self._recovered_config_path = None
+        self.title_edit.setText(profile.identity.title)
+        self.game_dir_edit.blockSignals(True)
+        self.game_dir_edit.setText(str(profile.game.game_dir))
+        self.game_dir_edit.blockSignals(False)
+        self.engine_binary_edit.setText(str(profile.engine.binary_path))
+        if profile.ui.icon_path is not None and not profile.ui.icon_path.exists():
+            profile.ui.icon_path = None
+        self._load_schema_from_profile()
+
+    def _hydrate_from_config_path(self, config_path: Path) -> None:
+        assert self._import_service is not None
+        try:
+            analysis = self._import_service.analyse_config(config_path)
+        except Exception:
+            return
+        self._profile = None
+        self._import_analysis = analysis
+        self._recovered_profile_path = None
+        self._recovered_config_path = config_path
+        self.title_edit.setText(analysis.title)
+        self.game_dir_edit.blockSignals(True)
+        self.game_dir_edit.setText(str(analysis.game_dir))
+        self.game_dir_edit.blockSignals(False)
+        self.engine_binary_edit.setText(str(analysis.engine_binary))
+        self._load_schema_from_import()
 
     def _update_icon_preview(self) -> None:
         icon = None

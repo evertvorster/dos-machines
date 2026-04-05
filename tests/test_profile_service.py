@@ -320,3 +320,62 @@ def test_profile_icon_can_be_set_and_cleared(tmp_path: Path) -> None:
 
     assert updated.ui.icon_path is None
     assert not (profile.game.game_dir / ".dosmachines" / "icon.svg").exists()
+
+
+def test_updating_moved_profile_reuses_managed_icon_in_new_directory(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    option_states = {
+        section.name: {
+            option.name: OptionState(value=option.default_value, checked=True, origin="default")
+            for option in section.options
+        }
+        for section in schema.sections
+        if section.name != "autoexec"
+    }
+    icon_source = tmp_path / "icon.svg"
+    icon_source.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#00ff00"/></svg>',
+        encoding="utf-8",
+    )
+    original_dir = tmp_path / "original-game"
+    moved_dir = tmp_path / "moved-game"
+
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Moved Icon Game",
+            game_dir=original_dir,
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            icon_source=icon_source,
+            option_states=option_states,
+        )
+    )
+
+    moved_managed_dir = moved_dir / ".dosmachines"
+    moved_managed_dir.mkdir(parents=True)
+    moved_profile_path = moved_managed_dir / "profile.json"
+    moved_profile_path.write_text((original_dir / ".dosmachines" / "profile.json").read_text(encoding="utf-8"), encoding="utf-8")
+    moved_icon_path = moved_managed_dir / "icon.svg"
+    moved_icon_path.write_text((original_dir / ".dosmachines" / "icon.svg").read_text(encoding="utf-8"), encoding="utf-8")
+
+    updated = profile_service.create(
+        CreateProfileRequest(
+            title="Moved Icon Game",
+            game_dir=moved_dir,
+            executable=profile.game.executable,
+            engine_binary=profile.engine.binary_path,
+            workspace_dir=tmp_path / "workspace",
+            option_states=profile.option_states,
+            autoexec_text=profile.autoexec_text,
+            existing_profile_path=moved_profile_path,
+        )
+    )
+
+    assert updated.ui.icon_path == moved_icon_path

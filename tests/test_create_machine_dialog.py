@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import stat
 
@@ -7,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
+from dos_machines.application.import_service import ImportService
 from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
@@ -274,3 +276,152 @@ def test_no_wheel_combo_box_never_changes_value() -> None:
 
     assert combo.currentText() == "dynamic"
     assert not event.isAccepted()
+
+
+def test_recovery_dialog_hydrates_existing_profile_when_game_dir_is_corrected(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    game_dir = tmp_path / "moved-game"
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Recovered Machine",
+            game_dir=game_dir,
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states={
+                section.name: {
+                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    for option in section.options
+                }
+                for section in schema.sections
+                if section.name != "autoexec"
+            },
+        )
+    )
+
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        profile_service=profile_service,
+        recovery_mode=True,
+    )
+
+    dialog.game_dir_edit.setText(str(game_dir))
+    request = dialog.build_request()
+
+    assert dialog.title_edit.text() == "Recovered Machine"
+    assert dialog.engine_binary_edit.text() == str(binary)
+    assert request.existing_profile_path == profile.game.game_dir / ".dosmachines" / "profile.json"
+
+
+def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    original_dir = tmp_path / "original-game"
+    moved_dir = tmp_path / "moved-game"
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Recovered Machine",
+            game_dir=original_dir,
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states={
+                section.name: {
+                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    for option in section.options
+                }
+                for section in schema.sections
+                if section.name != "autoexec"
+            },
+        )
+    )
+    moved_profile_path = moved_dir / ".dosmachines" / "profile.json"
+    moved_profile_path.parent.mkdir(parents=True)
+    moved_profile_path.write_text((original_dir / ".dosmachines" / "profile.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        profile_service=profile_service,
+        recovery_mode=True,
+    )
+
+    dialog.game_dir_edit.setText(str(moved_dir))
+    request = dialog.build_request()
+
+    assert dialog.game_dir_edit.text() == str(moved_dir)
+    assert request.game_dir == moved_dir
+    assert request.existing_profile_path == moved_profile_path
+
+
+def test_recovery_dialog_reloads_managed_config_when_profile_is_missing(tmp_path: Path, monkeypatch) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    import_service = ImportService(engine_registry, profile_service)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    engine_registry.register(binary)
+    monkeypatch.setenv("PATH", f"{binary.parent}:{os.environ.get('PATH', '')}")
+
+    game_dir = tmp_path / "moved-game"
+    managed_dir = game_dir / ".dosmachines"
+    managed_dir.mkdir(parents=True)
+    config_path = managed_dir / "dosbox.conf"
+    config_path.write_text(
+        "\n".join(
+            [
+                "# Generated by DOS Machines",
+                "# Machine: Recovered Config",
+                "",
+                "[cpu]",
+                "core = auto",
+                "",
+                "[autoexec]",
+                'mount c ".."',
+                "c:",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        import_service=import_service,
+        profile_service=profile_service,
+        recovery_mode=True,
+    )
+
+    dialog.game_dir_edit.setText(str(game_dir))
+    request = dialog.build_request()
+
+    assert dialog.game_dir_edit.text() == str(game_dir)
+    assert dialog.engine_binary_edit.text().endswith("dosbox")
+    assert request.import_source_path == config_path
+    assert request.existing_profile_path is None

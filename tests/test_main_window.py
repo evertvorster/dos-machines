@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from dos_machines.application.config_renderer import ConfigRenderer
@@ -72,3 +73,33 @@ def test_main_window_inherits_application_icon(tmp_path: Path) -> None:
         assert window.windowIcon().cacheKey() == test_icon.cacheKey()
     finally:
         app.setWindowIcon(original_icon)
+
+
+def test_main_window_uses_warning_icon_for_broken_launcher(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings = settings_service.load()
+    launcher = settings.workspace_path / "Broken.desktop"
+    launcher.write_text(
+        "\n".join(
+            [
+                "[Desktop Entry]",
+                "Type=Application",
+                "Name=Broken",
+                f"X-DOSMachines-ProfilePath={tmp_path / 'missing' / '.dosmachines' / 'profile.json'}",
+                f"Icon={tmp_path / 'missing-icon.png'}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    window, _ = _main_window(tmp_path)
+    window._list_model.set_current_dir(settings.workspace_path)
+    QApplication.processEvents()
+    index = window._list_model.index(0, 0)
+    icon = window._list_model.data(index, Qt.ItemDataRole.DecorationRole)
+    warning_icon = QApplication.style().standardIcon(window.style().StandardPixmap.SP_MessageBoxWarning)
+
+    assert icon is not None
+    assert not icon.isNull()
+    assert icon.pixmap(16, 16).toImage() == warning_icon.pixmap(16, 16).toImage()

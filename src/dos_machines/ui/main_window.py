@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 
 from PySide6.QtCore import QAbstractListModel, QDir, QFile, QModelIndex, QMimeData, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QFontMetrics, QIcon, QTextLayout
@@ -32,10 +33,11 @@ from dos_machines.ui.create_machine_dialog import CreateMachineDialog
 
 
 class WorkspaceListModel(QAbstractListModel):
-    def __init__(self, source_model: QFileSystemModel, workspace_root: Path, parent=None) -> None:
+    def __init__(self, source_model: QFileSystemModel, workspace_root: Path, workspace_service: WorkspaceService, parent=None) -> None:
         super().__init__(parent)
         self._source_model = source_model
         self._workspace_root = workspace_root
+        self._workspace_service = workspace_service
         self._current_dir = workspace_root
         self._source_model.directoryLoaded.connect(self._on_source_directory_loaded)
         self._source_model.rowsInserted.connect(self._on_source_rows_changed)
@@ -70,6 +72,12 @@ class WorkspaceListModel(QAbstractListModel):
                 return QIcon.fromTheme("go-up")
             return None
         source_index = self.map_to_source(index)
+        if role == Qt.ItemDataRole.DecorationRole and source_index.isValid():
+            file_info = self._source_model.fileInfo(source_index)
+            if file_info.isFile() and file_info.suffix() == "desktop":
+                entry = self._workspace_service.read_launcher_entry(Path(file_info.filePath()))
+                if entry.broken:
+                    return QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         return self._source_model.data(source_index, role)
 
     def flags(self, index):
@@ -374,7 +382,7 @@ class MainWindow(QMainWindow):
             | QDir.Filter.NoDotAndDotDot
         )
         self._model.fileRenamed.connect(self._on_file_renamed)
-        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self)
+        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self._workspace_service, self)
         self._view = WorkspaceFileView(self)
         self._view.setViewMode(QListView.ViewMode.IconMode)
         self._view.setMovement(QListView.Movement.Static)
@@ -436,7 +444,7 @@ class MainWindow(QMainWindow):
         self._workspace_service.set_workspace(Path(path))
         self._current_dir = self._workspace_service.workspace_path
         self._model.setRootPath(str(self._current_dir))
-        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self)
+        self._list_model = WorkspaceListModel(self._model, self._workspace_service.workspace_path, self._workspace_service, self)
         self._view.setModel(self._list_model)
         self._refresh()
 
@@ -666,29 +674,50 @@ class MainWindow(QMainWindow):
 
     def _configure_launcher(self, launcher_path: Path) -> None:
         entry = self._workspace_service.read_launcher_entry(launcher_path)
-        if entry.profile_path is None or not entry.profile_path.exists():
-            QMessageBox.warning(self, "Broken Machine", f"Missing profile: {entry.profile_path}")
-            return
-        try:
-            profile = self._profile_service.load(entry.profile_path)
-        except Exception as exc:  # pragma: no cover - UI safety net
-            QMessageBox.critical(self, "Load Failed", str(exc))
-            return
-        if (
-            (profile.ui.icon_path is None or not profile.ui.icon_path.exists())
-            and entry.icon_path is not None
-            and entry.icon_path.exists()
-        ):
-            profile.ui.icon_path = entry.icon_path
-        dialog = CreateMachineDialog(
-            launcher_path.parent,
-            self._settings_service,
-            self._engine_registry,
-            self._preset_service,
-            profile=profile,
-            import_service=self._import_service,
-            parent=self,
-        )
+        dialog: CreateMachineDialog
+        if entry.profile_path is not None and entry.profile_path.exists():
+            try:
+                profile = self._profile_service.load(entry.profile_path)
+            except Exception as exc:  # pragma: no cover - UI safety net
+                QMessageBox.critical(self, "Load Failed", str(exc))
+                return
+            if profile.ui.icon_path is not None and not profile.ui.icon_path.exists():
+                profile.ui.icon_path = None
+            if (
+                profile.ui.icon_path is None
+                and entry.icon_path is not None
+                and entry.icon_path.exists()
+            ):
+                profile.ui.icon_path = entry.icon_path
+            dialog = CreateMachineDialog(
+                launcher_path.parent,
+                self._settings_service,
+                self._engine_registry,
+                self._preset_service,
+                profile=profile,
+                import_service=self._import_service,
+                profile_service=self._profile_service,
+                parent=self,
+            )
+        else:
+            dialog = CreateMachineDialog(
+                launcher_path.parent,
+                self._settings_service,
+                self._engine_registry,
+                self._preset_service,
+                import_service=self._import_service,
+                profile_service=self._profile_service,
+                recovery_mode=True,
+                parent=self,
+            )
+            dialog.title_edit.setText(entry.title)
+            inferred_game_dir = self._infer_game_dir_from_entry(entry)
+            if inferred_game_dir is not None:
+                dialog.game_dir_edit.setText(str(inferred_game_dir))
+            engine_binary = self._extract_engine_binary(entry.exec_value)
+            if engine_binary is not None:
+                dialog.engine_binary_edit.setText(str(engine_binary))
+                dialog._load_schema_if_possible(silent=True)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         request = dialog.build_request()
@@ -706,6 +735,26 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save Failed", str(exc))
             return
         self._refresh()
+
+    def _infer_game_dir_from_entry(self, entry) -> Path | None:
+        if entry.profile_path is not None:
+            return entry.profile_path.parent.parent
+        if entry.working_dir is not None:
+            working_dir = entry.working_dir
+            if working_dir.name == ".dosmachines":
+                return working_dir.parent
+        return None
+
+    def _extract_engine_binary(self, exec_value: str | None) -> Path | None:
+        if not exec_value:
+            return None
+        try:
+            command = shlex.split(exec_value)
+        except ValueError:
+            return None
+        if not command:
+            return None
+        return Path(command[0]).expanduser()
 
     def _rename_launcher(self, launcher_path: Path) -> None:
         entry = self._workspace_service.read_launcher_entry(launcher_path)
