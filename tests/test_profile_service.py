@@ -72,6 +72,38 @@ def test_create_profile_writes_managed_files_and_launcher(tmp_path: Path) -> Non
     assert '"autoexec_text"' in profile_path.read_text(encoding="utf-8")
 
 
+def test_create_profile_can_write_raw_config_text_verbatim(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    raw_config = "[sdl]\nfullscreen = false\n\n[autoexec]\nmount c \"..\"\nc:\nCUSTOM.EXE\n"
+
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Raw Config",
+            game_dir=tmp_path / "raw-config",
+            executable="CUSTOM.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states={
+                section.name: {
+                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    for option in section.options
+                }
+                for section in schema.sections
+                if section.name != "autoexec"
+            },
+            raw_config_text=raw_config,
+        )
+    )
+
+    assert (profile.game.game_dir / ".dosmachines" / "dosbox.conf").read_text(encoding="utf-8") == raw_config
+
+
 def test_existing_profile_is_detected(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()

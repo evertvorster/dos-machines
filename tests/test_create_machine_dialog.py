@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import stat
+from types import MethodType
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
@@ -425,3 +426,70 @@ def test_recovery_dialog_reloads_managed_config_when_profile_is_missing(tmp_path
     assert dialog.engine_binary_edit.text().endswith("dosbox")
     assert request.import_source_path == config_path
     assert request.existing_profile_path is None
+
+
+def test_import_dialog_allows_save_with_only_non_blocking_issues(tmp_path: Path, monkeypatch) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    import_service = ImportService(engine_registry, profile_service)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    monkeypatch.setenv("PATH", f"{binary.parent}:{os.environ.get('PATH', '')}")
+
+    config_path = tmp_path / "game" / "dosbox.conf"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[sdl]\n"
+        "fullscreen = true\n"
+        "\n"
+        "[soundcanvas]\n"
+        "foo = bar\n",
+        encoding="utf-8",
+    )
+    analysis = import_service.analyse_config(config_path)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        import_service=import_service,
+        import_analysis=analysis,
+    )
+    accepted = {"called": False}
+
+    def _accept(self):
+        accepted["called"] = True
+
+    dialog.accept = MethodType(_accept, dialog)
+    dialog._validate_before_accept()
+
+    assert accepted["called"] is True
+
+
+def test_build_request_uses_edited_config_preview_text(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+
+    edited_config = "[sdl]\nfullscreen = false\n"
+    dialog._config_preview.setPlainText(edited_config)
+    request = dialog.build_request()
+
+    assert request.raw_config_text == edited_config

@@ -488,6 +488,8 @@ class CreateMachineDialog(QDialog):
         self._profile = profile
         self._recovered_profile_path: Path | None = None
         self._recovered_config_path: Path | None = None
+        self._updating_config_preview = False
+        self._config_preview_edited = False
         self._schema: EngineSchema | None = None
         self._engine_id: str | None = None
         self._option_states: dict[str, dict[str, OptionState]] = {}
@@ -516,7 +518,7 @@ class CreateMachineDialog(QDialog):
         self._apply_machine_preset_button = QPushButton("Apply Machine Preset")
         self._apply_machine_preset_button.clicked.connect(self._apply_machine_preset)
         self._config_preview = QTextEdit()
-        self._config_preview.setReadOnly(True)
+        self._config_preview.textChanged.connect(self._handle_config_preview_changed)
         self._icon_preview = QLabel()
         self._icon_preview.setFixedSize(96, 96)
         self._icon_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -566,6 +568,10 @@ class CreateMachineDialog(QDialog):
             notes = self._profile.identity.notes
         elif self._recovered_profile_path is not None and self._recovered_profile_path.exists():
             existing_profile_path = self._recovered_profile_path
+        elif self._import_analysis is not None and self._import_analysis.is_managed_config:
+            candidate = current_game_dir / ".dosmachines" / "profile.json"
+            if candidate.exists():
+                existing_profile_path = candidate
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
             game_dir=current_game_dir,
@@ -579,6 +585,7 @@ class CreateMachineDialog(QDialog):
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
             raw_overrides=self._import_analysis.raw_overrides if self._import_analysis is not None else None,
+            raw_config_text=self._config_preview.toPlainText(),
             import_source_path=self._import_analysis.config_path if self._import_analysis is not None else None,
             existing_profile_path=existing_profile_path,
         )
@@ -628,7 +635,7 @@ class CreateMachineDialog(QDialog):
     def _build_preview_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.addWidget(QLabel("Generated config preview"))
+        layout.addWidget(QLabel("Config preview (editable)"))
         layout.addWidget(self._config_preview)
         return tab
 
@@ -703,6 +710,7 @@ class CreateMachineDialog(QDialog):
             self._profile.game,
             self._profile.engine.binary_path,
         )
+        self._config_preview_edited = False
         self._update_icon_preview()
         self._rebuild_sections_overview()
 
@@ -721,6 +729,7 @@ class CreateMachineDialog(QDialog):
             for section in self._schema.sections
         }
         self._autoexec_text = self._import_analysis.autoexec_text
+        self._config_preview_edited = False
         self._update_icon_preview()
         self._rebuild_sections_overview()
 
@@ -770,6 +779,7 @@ class CreateMachineDialog(QDialog):
             )
         if self._profile is None and self._import_analysis is None and self._engine_id is not None:
             self._apply_engine_section_defaults()
+        self._config_preview_edited = False
         self._update_icon_preview()
         self._rebuild_sections_overview()
 
@@ -922,11 +932,24 @@ class CreateMachineDialog(QDialog):
         )
 
     def _update_preview(self) -> None:
+        if self._config_preview_edited:
+            return
         preview_profile = self._preview_profile()
         if preview_profile is None or self._schema is None:
-            self._config_preview.clear()
+            self._set_config_preview_text("")
             return
-        self._config_preview.setPlainText(self._renderer.render(preview_profile, self._schema))
+        self._set_config_preview_text(self._renderer.render(preview_profile, self._schema))
+
+    def _set_config_preview_text(self, text: str) -> None:
+        self._updating_config_preview = True
+        self._config_preview.setPlainText(text)
+        self._updating_config_preview = False
+        self._config_preview_edited = False
+
+    def _handle_config_preview_changed(self) -> None:
+        if self._updating_config_preview:
+            return
+        self._config_preview_edited = True
 
     def _validate_before_accept(self) -> None:
         if not self.title_edit.text().strip() or not self.game_dir_edit.text().strip():
@@ -937,7 +960,7 @@ class CreateMachineDialog(QDialog):
             return
         if self._import_analysis is not None and self._import_service is not None:
             self._reanalyse_raw_import()
-            if self._import_issues:
+            if any(issue.blocking for issue in self._import_issues):
                 QMessageBox.warning(
                     self,
                     "Import Issues",
@@ -958,6 +981,7 @@ class CreateMachineDialog(QDialog):
         self._last_reanalysed_raw_text = current_raw_text
         self._autoexec_text = latest.autoexec_text
         self._option_states = latest.option_states
+        self._config_preview_edited = False
         self.title_edit.setText(latest.title)
         self.game_dir_edit.setText(str(latest.game_dir))
         self.engine_binary_edit.setText(str(latest.engine_binary))
@@ -985,7 +1009,7 @@ class CreateMachineDialog(QDialog):
             if option.value_type == "boolean" and state.value.lower() not in {"true", "false", "1", "0"}:
                 remaining.append(issue)
                 continue
-            if option.choices and state.value not in option.choices:
+            if option.value_type in {"enum", "dynamic"} and option.choices and state.value not in option.choices:
                 remaining.append(issue)
                 continue
         self._import_issues = remaining

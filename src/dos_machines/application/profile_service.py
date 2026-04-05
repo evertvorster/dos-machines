@@ -28,6 +28,7 @@ class CreateProfileRequest:
     option_states: dict[str, dict[str, OptionState]] | None = None
     autoexec_text: str | None = None
     raw_overrides: dict[str, dict[str, str]] | None = None
+    raw_config_text: str | None = None
     import_source_path: Path | None = None
     existing_profile_path: Path | None = None
     overwrite_existing: bool = False
@@ -112,17 +113,18 @@ class ProfileService:
         elif existing is not None and existing.ui.icon_path is not None:
             profile.ui.icon_path = self._resolve_existing_icon_path(existing.ui.icon_path, managed_dir)
 
-        self.save(profile)
+        self.save(profile, raw_config_text=request.raw_config_text)
         return profile
 
-    def save(self, profile: MachineProfile) -> None:
+    def save(self, profile: MachineProfile, raw_config_text: str | None = None) -> None:
         managed_dir = self.managed_dir(profile.game.game_dir)
         managed_dir.mkdir(parents=True, exist_ok=True)
         profile_path = managed_dir / "profile.json"
         config_path = managed_dir / MANAGED_CONFIG_FILENAME
         schema = self._engine_registry.load_schema(profile.engine.engine_id)
         profile_path.write_text(profile.dumps(), encoding="utf-8")
-        config_path.write_text(self._config_renderer.render(profile, schema), encoding="utf-8")
+        config_text = raw_config_text if raw_config_text is not None else self._config_renderer.render(profile, schema)
+        config_path.write_text(config_text.rstrip() + "\n", encoding="utf-8")
 
     def load(self, profile_path: Path) -> MachineProfile:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))

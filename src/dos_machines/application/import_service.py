@@ -39,6 +39,7 @@ class ImportIssue:
     message: str
     option_name: str | None = None
     imported_value: str | None = None
+    blocking: bool = True
 
 
 class ImportService:
@@ -53,6 +54,7 @@ class ImportService:
         analysis = self.analyse_config(config_path)
         if analysis.has_issues:
             raise ValueError("Import has unresolved issues and must be reviewed in the editor.")
+        existing_profile_path = self._profile_service.profile_path_for_game(analysis.game_dir)
         request = CreateProfileRequest(
             title=analysis.title,
             game_dir=analysis.game_dir,
@@ -63,6 +65,7 @@ class ImportService:
             autoexec_text=analysis.autoexec_text,
             raw_overrides=analysis.raw_overrides,
             import_source_path=analysis.config_path,
+            existing_profile_path=existing_profile_path if existing_profile_path.exists() else None,
         )
         return self._profile_service.create(request)
 
@@ -133,6 +136,7 @@ class ImportService:
                     ImportIssue(
                         section_name=section_name,
                         message=f"Unknown section [{section_name}] is not supported by this engine schema.",
+                        blocking=False,
                     )
                 )
                 continue
@@ -147,6 +151,7 @@ class ImportService:
                             option_name=key,
                             imported_value=value,
                             message=f"Unknown setting '{key}' is not supported by this engine schema.",
+                            blocking=False,
                         )
                     )
 
@@ -250,7 +255,7 @@ class ImportService:
                 imported_value=imported_value,
                 message=f"Unsupported boolean value '{imported_value}' for '{option.name}'.",
             )
-        if option.choices and imported_value not in option.choices:
+        if option.value_type in {"enum", "dynamic"} and option.choices and imported_value not in option.choices:
             return ImportIssue(
                 section_name=section_name,
                 option_name=option.name,

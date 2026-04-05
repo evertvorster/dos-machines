@@ -14,6 +14,14 @@ POSSIBLE_VALUES_RE = re.compile(r"Possible values:\s*(?P<values>.+)$", re.IGNORE
 
 DYNAMIC_OPTIONS = {"glshader"}
 COMPOUND_MARKERS = ("<value>", "WxH", "X,Y", "N%", "relative", "spaces, commas, or semicolons")
+NON_CHOICE_LABELS = {
+    "note",
+    "notes",
+    "for example",
+    "they are",
+    "the format is",
+    "possible information to display are",
+}
 
 
 @dataclass(slots=True)
@@ -123,7 +131,7 @@ class ConfigSchemaParser:
             value_doc_match = VALUE_DOC_RE.match(comment_body)
             if value_doc_match:
                 value_name = value_doc_match.group("name").strip()
-                if value_name != option_name:
+                if value_name != option_name and not self._is_non_choice_label(value_name):
                     choice_help[value_name] = value_doc_match.group("text").strip()
                     if value_name not in choices:
                         choices.append(value_name)
@@ -154,6 +162,10 @@ class ConfigSchemaParser:
             return "boolean"
         if any(marker in help_text for marker in COMPOUND_MARKERS):
             return "compound"
+        if default_value.strip() and " " in default_value.strip():
+            return "compound"
+        if not default_value.strip():
+            return "text"
         if choices:
             if any(choice.startswith("<") or " " in choice for choice in choices):
                 return "compound"
@@ -168,3 +180,7 @@ class ConfigSchemaParser:
         except ValueError:
             return False
         return True
+
+    def _is_non_choice_label(self, value_name: str) -> bool:
+        lowered = value_name.lower().strip()
+        return lowered in NON_CHOICE_LABELS or lowered.startswith("-")
