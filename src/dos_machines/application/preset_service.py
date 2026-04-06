@@ -4,6 +4,10 @@ from uuid import uuid4
 import json
 
 from dos_machines.domain.models import AppPaths, MachinePreset, SectionPreset
+from dos_machines.domain.system_machine_presets import SYSTEM_MACHINE_PRESETS
+
+
+EXCLUDED_MACHINE_PRESET_SECTIONS = {"sdl"}
 
 
 class PresetService:
@@ -17,7 +21,13 @@ class PresetService:
 
     def load_machine_presets(self) -> list[MachinePreset]:
         payload = self._load_payload()
-        return [MachinePreset.from_json(item) for item in payload.get("machine_presets", [])]
+        return [self._normalize_machine_preset(MachinePreset.from_json(item)) for item in payload.get("machine_presets", [])]
+
+    def load_user_machine_presets(self) -> list[MachinePreset]:
+        return self.load_machine_presets()
+
+    def load_system_machine_presets(self) -> list[MachinePreset]:
+        return [self._normalize_machine_preset(preset) for preset in SYSTEM_MACHINE_PRESETS]
 
     def load_section_default(self, engine_id: str, section_name: str) -> dict[str, str] | None:
         payload = self._load_payload()
@@ -74,6 +84,8 @@ class PresetService:
             ]
         section_preset_ids: list[str] = []
         for section_name, values in section_values.items():
+            if section_name in EXCLUDED_MACHINE_PRESET_SECTIONS:
+                continue
             section_preset = SectionPreset(
                 preset_id=f"section-{uuid4().hex[:12]}",
                 title=f"{title} / {section_name}",
@@ -87,6 +99,7 @@ class PresetService:
             preset_id=existing_machine.preset_id if existing_machine is not None else f"machine-{uuid4().hex[:12]}",
             title=title,
             section_preset_ids=section_preset_ids,
+            source="user",
         )
         machine_presets.append(machine_preset)
         payload["section_presets"] = [item.to_json() for item in section_presets]
@@ -96,17 +109,32 @@ class PresetService:
 
     def resolve_machine_preset(self, preset_id: str) -> dict[str, dict[str, str]]:
         section_presets = {preset.preset_id: preset for preset in self.load_section_presets()}
-        machine_preset = next(
-            preset for preset in self.load_machine_presets() if preset.preset_id == preset_id
-        )
+        machine_preset = self.get_machine_preset(preset_id)
         resolved: dict[str, dict[str, str]] = {}
+        if machine_preset.sections:
+            for section_name, values in machine_preset.sections.items():
+                if section_name in EXCLUDED_MACHINE_PRESET_SECTIONS:
+                    continue
+                resolved.setdefault(section_name, {}).update(values)
+            return resolved
         for section_preset_id in machine_preset.section_preset_ids:
             section_preset = section_presets.get(section_preset_id)
             if section_preset is None:
                 continue
             for section_name, values in section_preset.sections.items():
+                if section_name in EXCLUDED_MACHINE_PRESET_SECTIONS:
+                    continue
                 resolved.setdefault(section_name, {}).update(values)
         return resolved
+
+    def get_machine_preset(self, preset_id: str) -> MachinePreset:
+        for preset in self.load_system_machine_presets():
+            if preset.preset_id == preset_id:
+                return preset
+        for preset in self.load_user_machine_presets():
+            if preset.preset_id == preset_id:
+                return preset
+        raise StopIteration(preset_id)
 
     def _load_payload(self) -> dict[str, object]:
         if not self._user_presets_path.exists():
@@ -118,4 +146,22 @@ class PresetService:
         self._user_presets_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+
+    def _normalize_machine_preset(self, preset: MachinePreset) -> MachinePreset:
+        return MachinePreset(
+            preset_id=preset.preset_id,
+            title=preset.title,
+            section_preset_ids=list(preset.section_preset_ids),
+            source=preset.source,
+            tier=preset.tier,
+            description=preset.description,
+            key_facts=list(preset.key_facts),
+            rationale=list(preset.rationale),
+            sources=list(preset.sources),
+            sections={
+                section_name: dict(values)
+                for section_name, values in preset.sections.items()
+                if section_name not in EXCLUDED_MACHINE_PRESET_SECTIONS
+            },
         )

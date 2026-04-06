@@ -14,7 +14,13 @@ from dos_machines.application.profile_service import CreateProfileRequest, Profi
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import OptionState, SchemaOption, SchemaSection
-from dos_machines.ui.create_machine_dialog import CollapsibleHelpWidget, CreateMachineDialog, NoWheelComboBox, SectionEditorDialog
+from dos_machines.ui.create_machine_dialog import (
+    CollapsibleHelpWidget,
+    CreateMachineDialog,
+    NoWheelComboBox,
+    SectionEditorDialog,
+    SystemPresetBrowserDialog,
+)
 
 
 def _fake_binary(path: Path, version_output: str = "dosbox-staging, version 0.82.2") -> Path:
@@ -493,3 +499,113 @@ def test_build_request_uses_edited_config_preview_text(tmp_path: Path) -> None:
     request = dialog.build_request()
 
     assert request.raw_config_text == edited_config
+
+
+def test_saving_machine_preset_from_dialog_omits_sdl(tmp_path: Path, monkeypatch) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+    dialog._option_states["sdl"]["fullscreen"].value = "true"
+    dialog._option_states["sdl"]["fullscreen"].checked = True
+    dialog._option_states["midi"]["mididevice"].value = "mt32"
+    dialog._option_states["midi"]["mididevice"].checked = True
+
+    monkeypatch.setattr(
+        "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
+        lambda *args, **kwargs: ("Preset A", True),
+    )
+    monkeypatch.setattr(
+        "dos_machines.ui.create_machine_dialog.QMessageBox.information",
+        lambda *args, **kwargs: None,
+    )
+    dialog._save_machine_preset()
+
+    preset = preset_service.load_user_machine_presets()[0]
+    resolved = preset_service.resolve_machine_preset(preset.preset_id)
+
+    assert "sdl" not in resolved
+    assert resolved["midi"]["mididevice"] == "mt32"
+
+
+def test_applying_user_machine_preset_keeps_current_sdl(tmp_path: Path, monkeypatch) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+    dialog._option_states["sdl"]["fullscreen"].value = "false"
+    dialog._option_states["sdl"]["fullscreen"].checked = True
+    preset_service.save_machine_preset("Preset A", {"sdl": {"fullscreen": "true"}, "midi": {"mididevice": "mt32"}})
+
+    monkeypatch.setattr(
+        "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
+        lambda *args, **kwargs: ("Preset A", True),
+    )
+    dialog._apply_user_machine_preset()
+
+    assert dialog._option_states["sdl"]["fullscreen"].value == "false"
+    assert dialog._option_states["midi"]["mididevice"].value == "mt32"
+
+
+def test_system_preset_browser_renders_details(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+
+    dialog = SystemPresetBrowserDialog(preset_service.load_system_machine_presets())
+
+    assert dialog.selected_preset is not None
+    assert "Hardware profile" in dialog._details.toPlainText()
+    assert dialog.selected_preset.preset_id in dialog._details.toPlainText()
+
+
+def test_applying_system_machine_preset_keeps_current_sdl(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+    dialog._option_states["sdl"]["fullscreen"].value = "false"
+    dialog._option_states["sdl"]["fullscreen"].checked = True
+
+    preset = next(
+        item for item in preset_service.load_system_machine_presets()
+        if item.preset_id == "486_vga_sb_mt32"
+    )
+    dialog._apply_machine_preset_values(preset)
+
+    assert dialog._option_states["sdl"]["fullscreen"].value == "false"
+    assert dialog._option_states["midi"]["mididevice"].value == "mt32"

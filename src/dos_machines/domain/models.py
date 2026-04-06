@@ -373,7 +373,14 @@ class SectionPreset:
 class MachinePreset:
     preset_id: str
     title: str
-    section_preset_ids: list[str]
+    section_preset_ids: list[str] = field(default_factory=list)
+    source: str = "user"
+    tier: str = ""
+    description: str = ""
+    key_facts: list[str] = field(default_factory=list)
+    rationale: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    sections: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -384,6 +391,16 @@ class MachinePreset:
             preset_id=payload["preset_id"],
             title=payload["title"],
             section_preset_ids=list(payload.get("section_preset_ids", [])),
+            source=payload.get("source", "user"),
+            tier=payload.get("tier", ""),
+            description=payload.get("description", ""),
+            key_facts=[str(item) for item in payload.get("key_facts", [])],
+            rationale=[str(item) for item in payload.get("rationale", [])],
+            sources=[str(item) for item in payload.get("sources", [])],
+            sections={
+                section: {name: str(value) for name, value in options.items()}
+                for section, options in payload.get("sections", {}).items()
+            },
         )
 
 

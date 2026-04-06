@@ -19,12 +19,15 @@ from PySide6.QtWidgets import (
     QLayoutItem,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QTabWidget,
     QTextEdit,
+    QTextBrowser,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -37,7 +40,7 @@ from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
 from dos_machines.application.profile_service import ProfileService
 from dos_machines.application.settings_service import SettingsService
-from dos_machines.domain.models import EngineSchema, MachineProfile, OptionState, SchemaOption, SchemaSection
+from dos_machines.domain.models import EngineSchema, MachinePreset, MachineProfile, OptionState, SchemaOption, SchemaSection
 
 
 class NoWheelMixin:
@@ -469,6 +472,75 @@ class AutoexecEditorDialog(QDialog):
         QMessageBox.information(self, "Default Saved", "Saved default for section 'autoexec'.")
 
 
+class SystemPresetBrowserDialog(QDialog):
+    def __init__(self, presets: list[MachinePreset], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Apply System Preset")
+        self.resize(920, 620)
+        self._presets = presets
+        self._selected_preset: MachinePreset | None = presets[0] if presets else None
+
+        self._list = QListWidget()
+        self._list.currentRowChanged.connect(self._handle_selection_changed)
+        for preset in presets:
+            item = QListWidgetItem(f"{preset.title}\n{preset.tier}".strip())
+            item.setData(Qt.ItemDataRole.UserRole, preset.preset_id)
+            self._list.addItem(item)
+
+        self._details = QTextBrowser()
+        self._details.setOpenExternalLinks(False)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        content = QHBoxLayout()
+        content.addWidget(self._list, 1)
+        content.addWidget(self._details, 2)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(content)
+        layout.addWidget(buttons)
+
+        if presets:
+            self._list.setCurrentRow(0)
+            self._render_preset(presets[0])
+
+    @property
+    def selected_preset(self) -> MachinePreset | None:
+        return self._selected_preset
+
+    def _handle_selection_changed(self, row: int) -> None:
+        if row < 0 or row >= len(self._presets):
+            self._selected_preset = None
+            self._details.clear()
+            return
+        preset = self._presets[row]
+        self._selected_preset = preset
+        self._render_preset(preset)
+
+    def _render_preset(self, preset: MachinePreset) -> None:
+        parts = [f"<h2>{escape(preset.title)}</h2>"]
+        if preset.tier:
+            parts.append(f"<p><b>{escape(preset.tier)}</b></p>")
+        if preset.description:
+            parts.append(f"<p>{escape(preset.description)}</p>")
+        if preset.key_facts:
+            parts.append("<p><b>Hardware profile</b></p><ul>")
+            parts.extend(f"<li>{escape(item)}</li>" for item in preset.key_facts)
+            parts.append("</ul>")
+        if preset.rationale:
+            parts.append("<p><b>Why this matters</b></p><ul>")
+            parts.extend(f"<li>{escape(item)}</li>" for item in preset.rationale)
+            parts.append("</ul>")
+        if preset.sources:
+            parts.append("<p><b>Sources</b></p><ul>")
+            parts.extend(f"<li>{escape(item)}</li>" for item in preset.sources)
+            parts.append("</ul>")
+        parts.append(f"<p><b>Preset ID</b>: <code>{escape(preset.preset_id)}</code></p>")
+        self._details.setHtml("".join(parts))
+
+
 class CreateMachineDialog(QDialog):
     def __init__(
         self,
@@ -525,8 +597,10 @@ class CreateMachineDialog(QDialog):
 
         self._save_machine_preset_button = QPushButton("Save Machine Preset")
         self._save_machine_preset_button.clicked.connect(self._save_machine_preset)
-        self._apply_machine_preset_button = QPushButton("Apply Machine Preset")
-        self._apply_machine_preset_button.clicked.connect(self._apply_machine_preset)
+        self._apply_user_preset_button = QPushButton("Apply User Preset")
+        self._apply_user_preset_button.clicked.connect(self._apply_user_machine_preset)
+        self._apply_system_preset_button = QPushButton("Apply System Preset")
+        self._apply_system_preset_button.clicked.connect(self._apply_system_machine_preset)
         self._config_preview = QTextEdit()
         self._config_preview.textChanged.connect(self._handle_config_preview_changed)
         self._icon_preview = QLabel()
@@ -623,7 +697,8 @@ class CreateMachineDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         toolbar = QHBoxLayout()
-        toolbar.addWidget(self._apply_machine_preset_button)
+        toolbar.addWidget(self._apply_user_preset_button)
+        toolbar.addWidget(self._apply_system_preset_button)
         toolbar.addWidget(self._save_machine_preset_button)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
@@ -857,12 +932,13 @@ class CreateMachineDialog(QDialog):
     def _sync_buttons(self) -> None:
         enabled = self._schema is not None
         self._save_machine_preset_button.setEnabled(enabled)
-        self._apply_machine_preset_button.setEnabled(enabled)
+        self._apply_user_preset_button.setEnabled(enabled)
+        self._apply_system_preset_button.setEnabled(enabled)
 
     def _save_machine_preset(self) -> None:
         if self._schema is None:
             return
-        titles = sorted(preset.title for preset in self._preset_service.load_machine_presets())
+        titles = sorted(preset.title for preset in self._preset_service.load_user_machine_presets())
         title, accepted = QInputDialog.getItem(self, "Save Machine Preset", "Preset name", titles, 0, True)
         if not accepted or not title.strip():
             return
@@ -873,23 +949,36 @@ class CreateMachineDialog(QDialog):
                 if state.checked
             }
             for section_name, options in self._option_states.items()
-            if section_name != "autoexec"
+            if section_name not in {"autoexec", "sdl"}
         }
         if self._autoexec_text.strip():
             values["autoexec"] = {"__text__": self._autoexec_text.strip()}
         self._preset_service.save_machine_preset(title.strip(), values)
         QMessageBox.information(self, "Preset Saved", f"Saved machine preset '{title.strip()}'.")
 
-    def _apply_machine_preset(self) -> None:
-        presets = self._preset_service.load_machine_presets()
+    def _apply_user_machine_preset(self) -> None:
+        presets = self._preset_service.load_user_machine_presets()
         if not presets:
-            QMessageBox.information(self, "No Presets", "No machine presets have been saved yet.")
+            QMessageBox.information(self, "No Presets", "No user machine presets have been saved yet.")
             return
         titles = [preset.title for preset in presets]
-        title, accepted = QInputDialog.getItem(self, "Apply Machine Preset", "Preset", titles, 0, False)
+        title, accepted = QInputDialog.getItem(self, "Apply User Preset", "Preset", titles, 0, False)
         if not accepted or not title:
             return
         preset = next(item for item in presets if item.title == title)
+        self._apply_machine_preset_values(preset)
+
+    def _apply_system_machine_preset(self) -> None:
+        presets = self._preset_service.load_system_machine_presets()
+        if not presets:
+            QMessageBox.information(self, "No Presets", "No shipped system presets are available.")
+            return
+        dialog = SystemPresetBrowserDialog(presets, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.selected_preset is None:
+            return
+        self._apply_machine_preset_values(dialog.selected_preset)
+
+    def _apply_machine_preset_values(self, preset: MachinePreset) -> None:
         resolved = self._preset_service.resolve_machine_preset(preset.preset_id)
         for section_name, values in resolved.items():
             if section_name == "autoexec":
