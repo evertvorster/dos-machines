@@ -501,7 +501,7 @@ def test_build_request_uses_edited_config_preview_text(tmp_path: Path) -> None:
     assert request.raw_config_text == edited_config
 
 
-def test_saving_machine_preset_from_dialog_omits_sdl(tmp_path: Path, monkeypatch) -> None:
+def test_saving_machine_preset_from_dialog_omits_sdl_and_autoexec(tmp_path: Path, monkeypatch) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
@@ -521,6 +521,7 @@ def test_saving_machine_preset_from_dialog_omits_sdl(tmp_path: Path, monkeypatch
     dialog._option_states["sdl"]["fullscreen"].checked = True
     dialog._option_states["midi"]["mididevice"].value = "mt32"
     dialog._option_states["midi"]["mididevice"].checked = True
+    dialog._autoexec_text = "mount c .\nc:"
 
     monkeypatch.setattr(
         "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
@@ -536,6 +537,7 @@ def test_saving_machine_preset_from_dialog_omits_sdl(tmp_path: Path, monkeypatch
     resolved = preset_service.resolve_machine_preset(preset.preset_id)
 
     assert "sdl" not in resolved
+    assert "autoexec" not in resolved
     assert resolved["midi"]["mididevice"] == "mt32"
 
 
@@ -566,6 +568,35 @@ def test_applying_user_machine_preset_keeps_current_sdl(tmp_path: Path, monkeypa
     dialog._apply_user_machine_preset()
 
     assert dialog._option_states["sdl"]["fullscreen"].value == "false"
+    assert dialog._option_states["midi"]["mididevice"].value == "mt32"
+
+
+def test_applying_user_machine_preset_keeps_current_autoexec(tmp_path: Path, monkeypatch) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+    dialog._autoexec_text = "mount c current\nc:"
+    preset_service.save_machine_preset("Preset A", {"autoexec": {"__text__": "mount c preset\nc:"}, "midi": {"mididevice": "mt32"}})
+
+    monkeypatch.setattr(
+        "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
+        lambda *args, **kwargs: ("Preset A", True),
+    )
+    dialog._apply_user_machine_preset()
+
+    assert dialog._autoexec_text == "mount c current\nc:"
     assert dialog._option_states["midi"]["mididevice"].value == "mt32"
 
 
@@ -611,3 +642,30 @@ def test_applying_system_machine_preset_keeps_current_sdl(tmp_path: Path) -> Non
     assert dialog._option_states["midi"]["mididevice"].value == "mt32"
     assert dialog._option_states["cpu"]["cputype"].value == "486"
     assert dialog._option_states["cpu"]["cpu_cycles"].value == "25000"
+
+
+def test_applying_system_machine_preset_keeps_current_autoexec(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+    )
+    dialog.engine_binary_edit.setText(str(binary))
+    dialog.game_dir_edit.setText(str(tmp_path / "game"))
+    dialog._load_schema_if_possible()
+    dialog._autoexec_text = "mount c current\nc:"
+
+    preset = next(
+        item for item in preset_service.load_system_machine_presets()
+        if item.preset_id == "486_vga_sb_mt32"
+    )
+    dialog._apply_machine_preset_values(preset)
+
+    assert dialog._autoexec_text == "mount c current\nc:"

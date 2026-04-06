@@ -951,8 +951,6 @@ class CreateMachineDialog(QDialog):
             for section_name, options in self._option_states.items()
             if section_name not in {"autoexec", "sdl"}
         }
-        if self._autoexec_text.strip():
-            values["autoexec"] = {"__text__": self._autoexec_text.strip()}
         self._preset_service.save_machine_preset(title.strip(), values)
         QMessageBox.information(self, "Preset Saved", f"Saved machine preset '{title.strip()}'.")
 

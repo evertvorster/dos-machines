@@ -102,23 +102,24 @@ def test_system_machine_presets_are_available_with_metadata(tmp_path: Path) -> N
     assert resolved["cpu"]["cpu_cycles"] == "25000"
 
 
-def test_saving_machine_preset_omits_sdl_section(tmp_path: Path) -> None:
+def test_saving_machine_preset_omits_sdl_and_autoexec_sections(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
 
     preset = preset_service.save_machine_preset(
         "No SDL",
-        {"sdl": {"fullscreen": "true"}, "midi": {"mididevice": "mt32"}},
+        {"sdl": {"fullscreen": "true"}, "autoexec": {"__text__": "mount c .\nc:"}, "midi": {"mididevice": "mt32"}},
     )
 
     resolved = preset_service.resolve_machine_preset(preset.preset_id)
 
     assert "sdl" not in resolved
+    assert "autoexec" not in resolved
     assert resolved["midi"]["mididevice"] == "mt32"
 
 
-def test_resolving_legacy_machine_preset_ignores_sdl_section(tmp_path: Path) -> None:
+def test_resolving_legacy_machine_preset_ignores_sdl_and_autoexec_sections(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
@@ -135,6 +136,12 @@ def test_resolving_legacy_machine_preset_ignores_sdl_section(tmp_path: Path) -> 
                 },
                 {
                     "preset_id": "section-b",
+                    "title": "Legacy / autoexec",
+                    "section_name": "autoexec",
+                    "sections": {"autoexec": {"__text__": "MOUNT C ."}},
+                },
+                {
+                    "preset_id": "section-c",
                     "title": "Legacy / midi",
                     "section_name": "midi",
                     "sections": {"midi": {"mididevice": "default"}},
@@ -144,7 +151,7 @@ def test_resolving_legacy_machine_preset_ignores_sdl_section(tmp_path: Path) -> 
                 {
                     "preset_id": "machine-a",
                     "title": "Legacy",
-                    "section_preset_ids": ["section-a", "section-b"],
+                    "section_preset_ids": ["section-a", "section-b", "section-c"],
                 }
             ],
         }
@@ -153,4 +160,5 @@ def test_resolving_legacy_machine_preset_ignores_sdl_section(tmp_path: Path) -> 
     resolved = preset_service.resolve_machine_preset("machine-a")
 
     assert "sdl" not in resolved
+    assert "autoexec" not in resolved
     assert resolved["midi"]["mididevice"] == "default"

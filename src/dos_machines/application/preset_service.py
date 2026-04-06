@@ -9,7 +9,7 @@ from dos_machines.domain.models import AppPaths, MachinePreset, SectionPreset
 from dos_machines.domain.system_machine_presets import SYSTEM_MACHINE_PRESETS
 
 
-EXCLUDED_MACHINE_PRESET_SECTIONS = {"sdl"}
+EXCLUDED_MACHINE_PRESET_SECTIONS = {"autoexec", "sdl"}
 
 
 class PresetService:
