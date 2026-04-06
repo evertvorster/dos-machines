@@ -97,6 +97,9 @@ def test_system_machine_presets_are_available_with_metadata(tmp_path: Path) -> N
     assert all(preset.source == "system" for preset in presets)
     assert any(preset.key_facts for preset in presets)
     assert any(preset.description for preset in presets)
+    resolved = preset_service.resolve_machine_preset("486_vga_sb_mt32")
+    assert resolved["cpu"]["cputype"] == "486"
+    assert resolved["cpu"]["cpu_cycles"] == "25000"
 
 
 def test_saving_machine_preset_omits_sdl_section(tmp_path: Path) -> None:

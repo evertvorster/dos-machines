@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from importlib import resources
 from uuid import uuid4
 import json
 
+from dos_machines.application.config_text import parse_config_text
 from dos_machines.domain.models import AppPaths, MachinePreset, SectionPreset
 from dos_machines.domain.system_machine_presets import SYSTEM_MACHINE_PRESETS
 
@@ -111,6 +113,10 @@ class PresetService:
         section_presets = {preset.preset_id: preset for preset in self.load_section_presets()}
         machine_preset = self.get_machine_preset(preset_id)
         resolved: dict[str, dict[str, str]] = {}
+        if machine_preset.source == "system":
+            for section_name, values in self._load_system_machine_preset_sections(machine_preset.preset_id).items():
+                resolved.setdefault(section_name, {}).update(values)
+            return resolved
         if machine_preset.sections:
             for section_name, values in machine_preset.sections.items():
                 if section_name in EXCLUDED_MACHINE_PRESET_SECTIONS:
@@ -165,3 +171,12 @@ class PresetService:
                 if section_name not in EXCLUDED_MACHINE_PRESET_SECTIONS
             },
         )
+
+    def _load_system_machine_preset_sections(self, preset_id: str) -> dict[str, dict[str, str]]:
+        asset = resources.files("dos_machines").joinpath("assets", "system-presets", f"{preset_id}.conf")
+        parsed_sections, _ = parse_config_text(asset.read_text(encoding="utf-8"))
+        return {
+            section_name: dict(values)
+            for section_name, values in parsed_sections.items()
+            if section_name not in EXCLUDED_MACHINE_PRESET_SECTIONS
+        }

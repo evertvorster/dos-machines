@@ -28,7 +28,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dos_machines = ["assets/*.svg"]
+dos_machines = ["assets/*.svg", "assets/system-presets/*.conf"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

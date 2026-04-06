@@ -609,3 +609,5 @@ def test_applying_system_machine_preset_keeps_current_sdl(tmp_path: Path) -> Non
 
     assert dialog._option_states["sdl"]["fullscreen"].value == "false"
     assert dialog._option_states["midi"]["mididevice"].value == "mt32"
+    assert dialog._option_states["cpu"]["cputype"].value == "486"
+    assert dialog._option_states["cpu"]["cpu_cycles"].value == "25000"
