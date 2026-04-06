@@ -32,6 +32,7 @@ from dos_machines.application.settings_service import SettingsService
 from dos_machines.application.workspace_service import WorkspaceService
 from dos_machines.domain.models import MachineProfile
 from dos_machines.ui.create_machine_dialog import CreateMachineDialog
+from dos_machines.ui.host_config_dialog import HostConfigDialog
 
 
 class WorkspaceListModel(QAbstractListModel):
@@ -428,6 +429,10 @@ class MainWindow(QMainWindow):
         add_machine.triggered.connect(self._add_machine)
         file_menu.addAction(add_machine)
 
+        configure_host = QAction("Configure Host…", self)
+        configure_host.triggered.connect(self._configure_host)
+        file_menu.addAction(configure_host)
+
         refresh = QAction("Refresh", self)
         refresh.triggered.connect(self._refresh)
         file_menu.addAction(refresh)
@@ -510,6 +515,15 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Create Machine Failed", str(exc))
         self._refresh()
+
+    def _configure_host(self) -> None:
+        dialog = HostConfigDialog(
+            self._settings_service,
+            self._engine_registry,
+            self._preset_service,
+            parent=self,
+        )
+        dialog.exec()
 
     def _resolve_new_machine_conflicts(self, request: CreateProfileRequest) -> CreateProfileRequest | None:
         managed_dir = request.game_dir.expanduser().resolve() / ".dosmachines"

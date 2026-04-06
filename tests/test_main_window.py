@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication
 
 from dos_machines.application.config_renderer import ConfigRenderer
@@ -215,3 +216,21 @@ def test_open_machine_media_warns_for_broken_launcher(tmp_path: Path) -> None:
 
     warning.assert_called_once()
     popen.assert_not_called()
+
+
+def test_file_menu_includes_configure_host_action(tmp_path: Path) -> None:
+    window, _ = _main_window(tmp_path)
+
+    action_texts = [action.text() for action in window.findChildren(QAction)]
+
+    assert "Configure Host…" in action_texts
+
+
+def test_configure_host_action_opens_dialog(tmp_path: Path) -> None:
+    window, _ = _main_window(tmp_path)
+
+    with patch("dos_machines.ui.main_window.HostConfigDialog") as dialog_cls:
+        window._configure_host()
+
+    dialog_cls.assert_called_once()
+    dialog_cls.return_value.exec.assert_called_once()
