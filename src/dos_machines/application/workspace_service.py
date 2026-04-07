@@ -23,22 +23,13 @@ class WorkspaceService:
     def set_workspace(self, path: Path) -> None:
         workspace = path.expanduser().resolve()
         workspace.mkdir(parents=True, exist_ok=True)
-        recents = [workspace] + [item for item in self._settings.recent_workspaces if item != workspace]
         self._settings.workspace_path = workspace
-        self._settings.recent_workspaces = recents[:10]
         self._settings_service.save(self._settings)
 
     def create_folder(self, parent: Path, name: str) -> Path:
         folder = parent / name
         folder.mkdir(parents=True, exist_ok=False)
         return folder
-
-    def scan_launchers(self) -> list[WorkspaceEntry]:
-        self.ensure_workspace()
-        entries: list[WorkspaceEntry] = []
-        for launcher in self.workspace_path.rglob("*.desktop"):
-            entries.append(self.read_launcher_entry(launcher))
-        return sorted(entries, key=lambda item: item.title.lower())
 
     def read_launcher_entry(self, launcher_path: Path) -> WorkspaceEntry:
         parser = configparser.ConfigParser(interpolation=None)
@@ -51,14 +42,18 @@ class WorkspaceService:
         exec_value = section.get("Exec")
         working_dir_value = section.get("Path")
         profile_path = Path(profile_value) if profile_value else None
-        working_dir = Path(working_dir_value).expanduser() if working_dir_value else None
+        working_dir = (
+            Path(working_dir_value).expanduser() if working_dir_value else None
+        )
         icon_path = None
         icon_name = None
         if icon_value and "/" in icon_value:
             icon_path = Path(icon_value).expanduser()
         elif icon_value:
             icon_name = icon_value
-        broken = (profile_path is not None and not profile_path.exists()) or (icon_path is not None and not icon_path.exists())
+        broken = (profile_path is not None and not profile_path.exists()) or (
+            icon_path is not None and not icon_path.exists()
+        )
         return WorkspaceEntry(
             launcher_path=launcher_path,
             title=title,

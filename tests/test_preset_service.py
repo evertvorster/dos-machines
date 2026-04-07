@@ -4,16 +4,11 @@ from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
 
 
-def test_section_and_machine_presets_round_trip(tmp_path: Path) -> None:
+def test_machine_presets_round_trip(tmp_path: Path) -> None:
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
 
-    section = preset_service.save_section_preset(
-        "Roland MIDI",
-        "midi",
-        {"mididevice": "mt32", "mpu401": "intelligent"},
-    )
     machine = preset_service.save_machine_preset(
         "MT-32 Adventure",
         {
@@ -22,11 +17,9 @@ def test_section_and_machine_presets_round_trip(tmp_path: Path) -> None:
         },
     )
 
-    sections = preset_service.load_section_presets()
     machines = preset_service.load_machine_presets()
     resolved = preset_service.resolve_machine_preset(machine.preset_id)
 
-    assert any(item.preset_id == section.preset_id for item in sections)
     assert any(item.preset_id == machine.preset_id for item in machines)
     assert resolved["midi"]["mididevice"] == "mt32"
 
@@ -39,24 +32,13 @@ def test_engine_scoped_section_defaults_round_trip(tmp_path: Path) -> None:
     preset_service.save_section_default("staging-a", "sdl", {"fullscreen": "true"})
     preset_service.save_section_default("staging-b", "sdl", {"fullscreen": "false"})
 
-    assert preset_service.load_section_default("staging-a", "sdl") == {"fullscreen": "true"}
-    assert preset_service.load_section_default("staging-b", "sdl") == {"fullscreen": "false"}
+    assert preset_service.load_section_default("staging-a", "sdl") == {
+        "fullscreen": "true"
+    }
+    assert preset_service.load_section_default("staging-b", "sdl") == {
+        "fullscreen": "false"
+    }
     assert preset_service.load_section_default("missing", "sdl") is None
-
-
-def test_saving_section_preset_with_existing_title_updates_it(tmp_path: Path) -> None:
-    settings_service = SettingsService(config_root=tmp_path / "config")
-    settings_service.load()
-    preset_service = PresetService(settings_service.app_paths)
-
-    original = preset_service.save_section_preset("Roland MIDI", "midi", {"mididevice": "mt32"})
-    updated = preset_service.save_section_preset("Roland MIDI", "midi", {"mididevice": "default"})
-
-    presets = [preset for preset in preset_service.load_section_presets() if preset.section_name == "midi"]
-
-    assert len(presets) == 1
-    assert updated.preset_id == original.preset_id
-    assert presets[0].sections["midi"]["mididevice"] == "default"
 
 
 def test_saving_machine_preset_with_existing_title_updates_it(tmp_path: Path) -> None:
@@ -74,14 +56,16 @@ def test_saving_machine_preset_with_existing_title_updates_it(tmp_path: Path) ->
     )
 
     machines = preset_service.load_machine_presets()
-    sections = preset_service.load_section_presets()
     resolved = preset_service.resolve_machine_preset(updated.preset_id)
 
     assert len(machines) == 1
     assert updated.preset_id == original.preset_id
     assert resolved["midi"]["mididevice"] == "default"
     assert resolved["render"]["glshader"] == "sharp"
-    assert all(not preset.title.startswith("Adventure / midi") or preset.sections["midi"]["mididevice"] == "default" for preset in sections)
+    assert machines[0].sections == {
+        "midi": {"mididevice": "default"},
+        "render": {"glshader": "sharp"},
+    }
 
 
 def test_system_machine_presets_are_available_with_metadata(tmp_path: Path) -> None:
@@ -109,7 +93,11 @@ def test_saving_machine_preset_omits_sdl_and_autoexec_sections(tmp_path: Path) -
 
     preset = preset_service.save_machine_preset(
         "No SDL",
-        {"sdl": {"fullscreen": "true"}, "autoexec": {"__text__": "mount c .\nc:"}, "midi": {"mididevice": "mt32"}},
+        {
+            "sdl": {"fullscreen": "true"},
+            "autoexec": {"__text__": "mount c .\nc:"},
+            "midi": {"mididevice": "mt32"},
+        },
     )
 
     resolved = preset_service.resolve_machine_preset(preset.preset_id)
@@ -117,48 +105,3 @@ def test_saving_machine_preset_omits_sdl_and_autoexec_sections(tmp_path: Path) -
     assert "sdl" not in resolved
     assert "autoexec" not in resolved
     assert resolved["midi"]["mididevice"] == "mt32"
-
-
-def test_resolving_legacy_machine_preset_ignores_sdl_and_autoexec_sections(tmp_path: Path) -> None:
-    settings_service = SettingsService(config_root=tmp_path / "config")
-    settings_service.load()
-    preset_service = PresetService(settings_service.app_paths)
-
-    preset_service._persist(
-        {
-            "section_defaults": {},
-            "section_presets": [
-                {
-                    "preset_id": "section-a",
-                    "title": "Legacy / sdl",
-                    "section_name": "sdl",
-                    "sections": {"sdl": {"fullscreen": "true"}},
-                },
-                {
-                    "preset_id": "section-b",
-                    "title": "Legacy / autoexec",
-                    "section_name": "autoexec",
-                    "sections": {"autoexec": {"__text__": "MOUNT C ."}},
-                },
-                {
-                    "preset_id": "section-c",
-                    "title": "Legacy / midi",
-                    "section_name": "midi",
-                    "sections": {"midi": {"mididevice": "default"}},
-                },
-            ],
-            "machine_presets": [
-                {
-                    "preset_id": "machine-a",
-                    "title": "Legacy",
-                    "section_preset_ids": ["section-a", "section-b", "section-c"],
-                }
-            ],
-        }
-    )
-
-    resolved = preset_service.resolve_machine_preset("machine-a")
-
-    assert "sdl" not in resolved
-    assert "autoexec" not in resolved
-    assert resolved["midi"]["mididevice"] == "default"

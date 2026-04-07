@@ -9,14 +9,15 @@ from dos_machines.domain.models import AppPaths, Settings
 
 class SettingsService:
     def __init__(self, config_root: Path | None = None) -> None:
-        base_root = config_root or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        base_root = config_root or Path(
+            os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
+        )
         config_dir = base_root / "dos-machines"
         self.app_paths = AppPaths(
             config_root=config_dir,
             settings_path=config_dir / "settings.json",
             engines_root=config_dir / "engines",
             presets_root=config_dir / "presets",
-            icons_root=config_dir / "icons",
             default_workspace=config_dir / "workspace",
         )
 
@@ -24,7 +25,6 @@ class SettingsService:
         self.app_paths.config_root.mkdir(parents=True, exist_ok=True)
         self.app_paths.engines_root.mkdir(parents=True, exist_ok=True)
         self.app_paths.presets_root.mkdir(parents=True, exist_ok=True)
-        self.app_paths.icons_root.mkdir(parents=True, exist_ok=True)
         self.app_paths.default_workspace.mkdir(parents=True, exist_ok=True)
 
     def load(self) -> Settings:

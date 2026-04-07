@@ -44,7 +44,9 @@ class HostConfigDialog(QDialog):
 
         settings = self._settings_service.load()
         self.engine_binary_edit = QLineEdit(
-            str(settings.last_engine_binary_path) if settings.last_engine_binary_path is not None else ""
+            str(settings.last_engine_binary_path)
+            if settings.last_engine_binary_path is not None
+            else ""
         )
         self.engine_binary_edit.editingFinished.connect(self._load_schema_if_possible)
 
@@ -60,13 +62,16 @@ class HostConfigDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         form = QFormLayout()
-        form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
+        form.addRow(
+            "Engine Binary",
+            self._with_browse(self.engine_binary_edit, self._browse_engine_binary),
+        )
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self._edit_sdl_button)
         layout.addWidget(self._status_label)
-        layout.addWidget(QLabel("Current SDL defaults"))
+        layout.addWidget(QLabel("Current SDL engine defaults"))
         layout.addWidget(self._summary)
         layout.addWidget(buttons)
 
@@ -82,7 +87,9 @@ class HostConfigDialog(QDialog):
         return layout
 
     def _browse_engine_binary(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary", self.engine_binary_edit.text().strip())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select DOSBox Binary", self.engine_binary_edit.text().strip()
+        )
         if not path:
             return
         self.engine_binary_edit.setText(path)
@@ -114,29 +121,50 @@ class HostConfigDialog(QDialog):
 
     def _load_sdl_defaults(self) -> None:
         assert self._schema is not None
-        sdl_section = next((section for section in self._schema.sections if section.name == "sdl"), None)
+        sdl_section = next(
+            (section for section in self._schema.sections if section.name == "sdl"),
+            None,
+        )
         if sdl_section is None:
             self._sdl_option_states = {}
             return
-        saved = self._preset_service.load_section_default(self._engine_id, "sdl") if self._engine_id is not None else None
+        saved = (
+            self._preset_service.load_section_default(self._engine_id, "sdl")
+            if self._engine_id is not None
+            else None
+        )
         self._sdl_option_states = {
             option.name: OptionState(
-                value=saved[option.name] if saved and option.name in saved else option.default_value,
+                value=saved[option.name]
+                if saved and option.name in saved
+                else option.default_value,
                 checked=saved is not None and option.name in saved,
-                origin="default-preset" if saved is not None and option.name in saved else "default",
+                origin="default-preset"
+                if saved is not None and option.name in saved
+                else "default",
             )
             for option in sdl_section.options
         }
 
     def _sync_ui(self) -> None:
-        has_schema = self._schema is not None and self._engine_id is not None and bool(self._sdl_option_states)
+        has_schema = (
+            self._schema is not None
+            and self._engine_id is not None
+            and bool(self._sdl_option_states)
+        )
         self._edit_sdl_button.setEnabled(has_schema)
         if not self.engine_binary_edit.text().strip():
-            self._status_label.setText("Choose a DOSBox engine binary to configure host SDL defaults.")
+            self._status_label.setText(
+                "Choose a DOSBox engine binary to configure SDL engine defaults."
+            )
         elif not has_schema:
-            self._status_label.setText("Load a DOSBox engine schema before editing host SDL defaults.")
+            self._status_label.setText(
+                "Load a DOSBox engine schema before editing SDL engine defaults."
+            )
         else:
-            self._status_label.setText("These SDL defaults are used when creating a new machine.")
+            self._status_label.setText(
+                "These SDL engine defaults are used when creating a new machine."
+            )
         self._summary.setPlainText(self._summary_text())
 
     def _summary_text(self) -> str:
@@ -152,9 +180,16 @@ class HostConfigDialog(QDialog):
     def _edit_sdl_settings(self) -> None:
         if self._schema is None or self._engine_id is None:
             return
-        sdl_section = next((section for section in self._schema.sections if section.name == "sdl"), None)
+        sdl_section = next(
+            (section for section in self._schema.sections if section.name == "sdl"),
+            None,
+        )
         if sdl_section is None:
-            QMessageBox.warning(self, "Section Missing", "The loaded engine schema does not define an SDL section.")
+            QMessageBox.warning(
+                self,
+                "Section Missing",
+                "The loaded engine schema does not define an SDL section.",
+            )
             return
         dialog = SectionEditorDialog(
             sdl_section,
@@ -169,7 +204,11 @@ class HostConfigDialog(QDialog):
 
     def _save(self) -> None:
         if self._engine_id is None or self._schema is None:
-            QMessageBox.warning(self, "Schema Not Loaded", "Load an engine schema before saving host defaults.")
+            QMessageBox.warning(
+                self,
+                "Schema Not Loaded",
+                "Load an engine schema before saving SDL engine defaults.",
+            )
             return
         values = {
             option_name: state.value

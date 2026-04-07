@@ -35,12 +35,23 @@ from PySide6.QtWidgets import (
 
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
-from dos_machines.application.import_service import ImportAnalysis, ImportIssue, ImportService
+from dos_machines.application.import_service import (
+    ImportAnalysis,
+    ImportIssue,
+    ImportService,
+)
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.profile_service import CreateProfileRequest
 from dos_machines.application.profile_service import ProfileService
 from dos_machines.application.settings_service import SettingsService
-from dos_machines.domain.models import EngineSchema, MachinePreset, MachineProfile, OptionState, SchemaOption, SchemaSection
+from dos_machines.domain.models import (
+    EngineSchema,
+    MachinePreset,
+    MachineProfile,
+    OptionState,
+    SchemaOption,
+    SchemaSection,
+)
 
 
 class NoWheelMixin:
@@ -61,7 +72,9 @@ class NoWheelDoubleSpinBox(NoWheelMixin, QDoubleSpinBox):
 
 
 class FlowLayout(QLayout):
-    def __init__(self, parent=None, margin: int = 0, hspacing: int = 12, vspacing: int = 12) -> None:
+    def __init__(
+        self, parent=None, margin: int = 0, hspacing: int = 12, vspacing: int = 12
+    ) -> None:
         super().__init__(parent)
         self._items: list[QLayoutItem] = []
         self._hspacing = hspacing
@@ -108,7 +121,9 @@ class FlowLayout(QLayout):
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
         margins = self.contentsMargins()
-        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        size += QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
         return size
 
     def _do_layout(self, rect: QRect, test_only: bool) -> int:
@@ -182,7 +197,9 @@ class CollapsibleHelpWidget(QWidget):
 
     def _sync_state(self) -> None:
         self._preview_label.setText(self._formatted_lines[0])
-        self._toggle_button.setArrowType(Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow)
+        self._toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow
+        )
         if self._expanded and len(self._formatted_lines) > 1:
             self._details_label.setText("<br>".join(self._formatted_lines[1:]))
             self._details_label.show()
@@ -217,14 +234,8 @@ class SectionEditorDialog(QDialog):
         self._scroll.setWidget(self._content)
 
         toolbar = QHBoxLayout()
-        self._apply_preset_button = QPushButton("Apply Section Preset")
-        self._apply_preset_button.clicked.connect(self._apply_section_preset)
-        self._save_preset_button = QPushButton("Save Section Preset")
-        self._save_preset_button.clicked.connect(self._save_section_preset)
-        self._save_default_button = QPushButton("Save as Default")
+        self._save_default_button = QPushButton("Save as Engine Default")
         self._save_default_button.clicked.connect(self._save_section_default)
-        toolbar.addWidget(self._apply_preset_button)
-        toolbar.addWidget(self._save_preset_button)
         toolbar.addWidget(self._save_default_button)
         toolbar.addStretch(1)
 
@@ -248,7 +259,9 @@ class SectionEditorDialog(QDialog):
                 widget.deleteLater()
         self._field_widgets.clear()
 
-        section_only_issues = [issue for issue in self._issues if issue.option_name is None]
+        section_only_issues = [
+            issue for issue in self._issues if issue.option_name is None
+        ]
         if section_only_issues:
             warning = QLabel("\n".join(issue.message for issue in section_only_issues))
             warning.setWordWrap(True)
@@ -264,7 +277,9 @@ class SectionEditorDialog(QDialog):
         box = QGroupBox(option.name)
         layout = QVBoxLayout(box)
 
-        option_issues = [issue for issue in self._issues if issue.option_name == option.name]
+        option_issues = [
+            issue for issue in self._issues if issue.option_name == option.name
+        ]
         if option_issues:
             warning = QLabel("\n".join(issue.message for issue in option_issues))
             warning.setWordWrap(True)
@@ -289,14 +304,22 @@ class SectionEditorDialog(QDialog):
 
         return box
 
-    def _build_editor(self, option: SchemaOption, state: OptionState, option_issues: list[ImportIssue]) -> QWidget:
+    def _build_editor(
+        self, option: SchemaOption, state: OptionState, option_issues: list[ImportIssue]
+    ) -> QWidget:
         has_invalid_issue = bool(option_issues)
         if option.value_type == "boolean":
             editor = NoWheelComboBox()
             editor.addItems(["true", "false"])
-            current_value = state.value.lower() if not has_invalid_issue else option.default_value.lower()
+            current_value = (
+                state.value.lower()
+                if not has_invalid_issue
+                else option.default_value.lower()
+            )
             editor.setCurrentText(current_value)
-            editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+            editor.currentTextChanged.connect(
+                lambda value, name=option.name: self._set_value(name, value)
+            )
             return editor
         if option.value_type in {"enum", "dynamic"} and option.choices:
             editor = NoWheelComboBox()
@@ -304,11 +327,17 @@ class SectionEditorDialog(QDialog):
             editor.setEditable(option.value_type == "dynamic")
             if state.value not in option.choices and not has_invalid_issue:
                 editor.addItem(state.value)
-            editor.setCurrentText(state.value if not has_invalid_issue else option.default_value)
-            editor.currentTextChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+            editor.setCurrentText(
+                state.value if not has_invalid_issue else option.default_value
+            )
+            editor.currentTextChanged.connect(
+                lambda value, name=option.name: self._set_value(name, value)
+            )
             return editor
         editor = QLineEdit(state.value)
-        editor.textChanged.connect(lambda value, name=option.name: self._set_value(name, value))
+        editor.textChanged.connect(
+            lambda value, name=option.name: self._set_value(name, value)
+        )
         return editor
 
     def _set_value(self, option_name: str, value: str) -> None:
@@ -329,52 +358,27 @@ class SectionEditorDialog(QDialog):
             widget.setText(option.default_value)
         self._rebuild_cards()
 
-    def _apply_section_preset(self) -> None:
-        presets = [preset for preset in self._preset_service.load_section_presets() if preset.section_name == self._section.name]
-        if not presets:
-            QMessageBox.information(self, "No Presets", f"No presets saved for section '{self._section.name}'.")
-            return
-        titles = [preset.title for preset in presets]
-        title, accepted = QInputDialog.getItem(self, "Apply Section Preset", "Preset", titles, 0, False)
-        if not accepted or not title:
-            return
-        preset = next(item for item in presets if item.title == title)
-        for option_name, value in preset.sections.get(self._section.name, {}).items():
-            if option_name not in self._option_states:
-                continue
-            self._option_states[option_name].value = value
-            self._option_states[option_name].checked = True
-            self._option_states[option_name].origin = "preset"
-        self._rebuild_cards()
-
-    def _save_section_preset(self) -> None:
-        titles = sorted(
-            preset.title
-            for preset in self._preset_service.load_section_presets()
-            if preset.section_name == self._section.name
-        )
-        title, accepted = QInputDialog.getItem(self, "Save Section Preset", "Preset name", titles, 0, True)
-        if not accepted or not title.strip():
-            return
-        values = {
-            option_name: state.value
-            for option_name, state in self._option_states.items()
-            if state.checked
-        }
-        self._preset_service.save_section_preset(title.strip(), self._section.name, values)
-        QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
-
     def _save_section_default(self) -> None:
         if self._engine_id is None:
-            QMessageBox.warning(self, "Schema Not Loaded", "Load an engine schema before saving defaults.")
+            QMessageBox.warning(
+                self,
+                "Schema Not Loaded",
+                "Load an engine schema before saving engine defaults.",
+            )
             return
         values = {
             option_name: state.value
             for option_name, state in self._option_states.items()
             if state.checked
         }
-        self._preset_service.save_section_default(self._engine_id, self._section.name, values)
-        QMessageBox.information(self, "Default Saved", f"Saved default for section '{self._section.name}'.")
+        self._preset_service.save_section_default(
+            self._engine_id, self._section.name, values
+        )
+        QMessageBox.information(
+            self,
+            "Engine Default Saved",
+            f"Saved engine default for section '{self._section.name}'.",
+        )
 
     def _format_help_lines(self, text: str) -> list[str]:
         lines: list[str] = []
@@ -396,16 +400,26 @@ class SectionEditorDialog(QDialog):
         return "<br>".join(self._format_help_lines(text))
 
     def _looks_like_option_line(self, line: str) -> bool:
-        if line.startswith(("Possible values:", "Deprecated values:", "Notes:", "Note:")):
+        if line.startswith(
+            ("Possible values:", "Deprecated values:", "Notes:", "Note:")
+        ):
             return True
         if ":" not in line:
             return False
         prefix = line.split(":", 1)[0].strip()
-        return bool(prefix) and all(character.isalnum() or character in "_-+<>./%, " for character in prefix)
+        return bool(prefix) and all(
+            character.isalnum() or character in "_-+<>./%, " for character in prefix
+        )
 
 
 class AutoexecEditorDialog(QDialog):
-    def __init__(self, autoexec_text: str, preset_service: PresetService, engine_id: str | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        autoexec_text: str,
+        preset_service: PresetService,
+        engine_id: str | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Section: autoexec")
         self.resize(760, 600)
@@ -415,14 +429,8 @@ class AutoexecEditorDialog(QDialog):
         self._editor.setPlainText(autoexec_text)
 
         toolbar = QHBoxLayout()
-        apply_button = QPushButton("Apply Section Preset")
-        apply_button.clicked.connect(self._apply_section_preset)
-        save_button = QPushButton("Save Section Preset")
-        save_button.clicked.connect(self._save_section_preset)
-        save_default_button = QPushButton("Save as Default")
+        save_default_button = QPushButton("Save as Engine Default")
         save_default_button.clicked.connect(self._save_section_default)
-        toolbar.addWidget(apply_button)
-        toolbar.addWidget(save_button)
         toolbar.addWidget(save_default_button)
         toolbar.addStretch(1)
 
@@ -440,36 +448,20 @@ class AutoexecEditorDialog(QDialog):
     def autoexec_text(self) -> str:
         return self._editor.toPlainText().strip()
 
-    def _apply_section_preset(self) -> None:
-        presets = [preset for preset in self._preset_service.load_section_presets() if preset.section_name == "autoexec"]
-        if not presets:
-            QMessageBox.information(self, "No Presets", "No presets saved for section 'autoexec'.")
-            return
-        titles = [preset.title for preset in presets]
-        title, accepted = QInputDialog.getItem(self, "Apply Section Preset", "Preset", titles, 0, False)
-        if not accepted or not title:
-            return
-        preset = next(item for item in presets if item.title == title)
-        self._editor.setPlainText(preset.sections.get("autoexec", {}).get("__text__", ""))
-
-    def _save_section_preset(self) -> None:
-        titles = sorted(
-            preset.title
-            for preset in self._preset_service.load_section_presets()
-            if preset.section_name == "autoexec"
-        )
-        title, accepted = QInputDialog.getItem(self, "Save Section Preset", "Preset name", titles, 0, True)
-        if not accepted or not title.strip():
-            return
-        self._preset_service.save_section_preset(title.strip(), "autoexec", {"__text__": self.autoexec_text})
-        QMessageBox.information(self, "Preset Saved", f"Saved section preset '{title.strip()}'.")
-
     def _save_section_default(self) -> None:
         if self._engine_id is None:
-            QMessageBox.warning(self, "Schema Not Loaded", "Load an engine schema before saving defaults.")
+            QMessageBox.warning(
+                self,
+                "Schema Not Loaded",
+                "Load an engine schema before saving engine defaults.",
+            )
             return
-        self._preset_service.save_section_default(self._engine_id, "autoexec", {"__text__": self.autoexec_text})
-        QMessageBox.information(self, "Default Saved", "Saved default for section 'autoexec'.")
+        self._preset_service.save_section_default(
+            self._engine_id, "autoexec", {"__text__": self.autoexec_text}
+        )
+        QMessageBox.information(
+            self, "Engine Default Saved", "Saved engine default for section 'autoexec'."
+        )
 
 
 class SystemPresetBrowserDialog(QDialog):
@@ -537,7 +529,9 @@ class SystemPresetBrowserDialog(QDialog):
             parts.append("<p><b>Sources</b></p><ul>")
             parts.extend(f"<li>{escape(item)}</li>" for item in preset.sources)
             parts.append("</ul>")
-        parts.append(f"<p><b>Preset ID</b>: <code>{escape(preset.preset_id)}</code></p>")
+        parts.append(
+            f"<p><b>Preset ID</b>: <code>{escape(preset.preset_id)}</code></p>"
+        )
         self._details.setHtml("".join(parts))
 
 
@@ -556,7 +550,13 @@ class CreateMachineDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Configure Imported Machine" if import_analysis is not None else "Configure Machine" if profile is not None else "Add New Machine")
+        self.setWindowTitle(
+            "Configure Imported Machine"
+            if import_analysis is not None
+            else "Configure Machine"
+            if profile is not None
+            else "Add New Machine"
+        )
         self.resize(980, 760)
         self._workspace_dir = workspace_dir
         self._settings_service = settings_service
@@ -579,20 +579,39 @@ class CreateMachineDialog(QDialog):
         self._autoexec_text = profile.autoexec_text if profile is not None else ""
         self._icon_source = None
         self._remove_icon = False
-        self._import_issues: list[ImportIssue] = list(import_analysis.issues) if import_analysis is not None else []
-        self._raw_import_text = import_analysis.raw_text if import_analysis is not None else ""
+        self._import_issues: list[ImportIssue] = (
+            list(import_analysis.issues) if import_analysis is not None else []
+        )
+        self._raw_import_text = (
+            import_analysis.raw_text if import_analysis is not None else ""
+        )
         self._last_reanalysed_raw_text = self._raw_import_text
         self._raw_import_edit = QTextEdit()
         self._raw_import_edit.setPlainText(self._raw_import_text)
         settings = self._settings_service.load()
 
-        self.title_edit = QLineEdit(profile.identity.title if profile else import_analysis.title if import_analysis else "")
-        self.game_dir_edit = QLineEdit(str(profile.game.game_dir) if profile else str(import_analysis.game_dir) if import_analysis else "")
+        self.title_edit = QLineEdit(
+            profile.identity.title
+            if profile
+            else import_analysis.title
+            if import_analysis
+            else ""
+        )
+        self.game_dir_edit = QLineEdit(
+            str(profile.game.game_dir)
+            if profile
+            else str(import_analysis.game_dir)
+            if import_analysis
+            else ""
+        )
         self.engine_binary_edit = QLineEdit(
             str(profile.engine.binary_path)
-            if profile else str(import_analysis.engine_binary)
-            if import_analysis else str(settings.last_engine_binary_path)
-            if settings.last_engine_binary_path is not None else ""
+            if profile
+            else str(import_analysis.engine_binary)
+            if import_analysis
+            else str(settings.last_engine_binary_path)
+            if settings.last_engine_binary_path is not None
+            else ""
         )
 
         self._save_machine_preset_button = QPushButton("Save Machine Preset")
@@ -600,7 +619,9 @@ class CreateMachineDialog(QDialog):
         self._apply_user_preset_button = QPushButton("Apply User Preset")
         self._apply_user_preset_button.clicked.connect(self._apply_user_machine_preset)
         self._apply_system_preset_button = QPushButton("Apply System Preset")
-        self._apply_system_preset_button.clicked.connect(self._apply_system_machine_preset)
+        self._apply_system_preset_button.clicked.connect(
+            self._apply_system_machine_preset
+        )
         self._config_preview = QTextEdit()
         self._config_preview.textChanged.connect(self._handle_config_preview_changed)
         self._icon_preview = QLabel()
@@ -647,30 +668,51 @@ class CreateMachineDialog(QDialog):
         existing_profile_path = None
         notes = ""
         current_game_dir = Path(self.game_dir_edit.text().strip()).expanduser()
-        if self._profile is not None and self._profile.game.game_dir == current_game_dir:
-            existing_profile_path = self._profile.game.game_dir / ".dosmachines" / "profile.json"
+        if (
+            self._profile is not None
+            and self._profile.game.game_dir == current_game_dir
+        ):
+            existing_profile_path = (
+                self._profile.game.game_dir / ".dosmachines" / "profile.json"
+            )
             notes = self._profile.identity.notes
-        elif self._recovered_profile_path is not None and self._recovered_profile_path.exists():
+        elif (
+            self._recovered_profile_path is not None
+            and self._recovered_profile_path.exists()
+        ):
             existing_profile_path = self._recovered_profile_path
-        elif self._import_analysis is not None and self._import_analysis.is_managed_config:
+        elif (
+            self._import_analysis is not None
+            and self._import_analysis.is_managed_config
+        ):
             candidate = current_game_dir / ".dosmachines" / "profile.json"
             if candidate.exists():
                 existing_profile_path = candidate
         return CreateProfileRequest(
             title=self.title_edit.text().strip(),
             game_dir=current_game_dir,
-            executable=self._profile.game.executable if self._profile is not None else self._import_analysis.executable if self._import_analysis is not None else "",
+            executable=self._profile.game.executable
+            if self._profile is not None
+            else self._import_analysis.executable
+            if self._import_analysis is not None
+            else "",
             engine_binary=Path(self.engine_binary_edit.text().strip()).expanduser(),
             workspace_dir=self._workspace_dir,
-            setup_executable=self._profile.game.setup_executable if self._profile is not None else None,
+            setup_executable=self._profile.game.setup_executable
+            if self._profile is not None
+            else None,
             notes=notes,
             icon_source=self._icon_source,
             remove_icon=self._remove_icon,
             option_states=self._option_states,
             autoexec_text=self._autoexec_text,
-            raw_overrides=self._import_analysis.raw_overrides if self._import_analysis is not None else None,
+            raw_overrides=self._import_analysis.raw_overrides
+            if self._import_analysis is not None
+            else None,
             raw_config_text=self._config_preview.toPlainText(),
-            import_source_path=self._import_analysis.config_path if self._import_analysis is not None else None,
+            import_source_path=self._import_analysis.config_path
+            if self._import_analysis is not None
+            else None,
             existing_profile_path=existing_profile_path,
         )
 
@@ -679,10 +721,18 @@ class CreateMachineDialog(QDialog):
         layout = QVBoxLayout(tab)
         form = QFormLayout()
         form.addRow("Title", self.title_edit)
-        form.addRow("Game Directory", self._with_browse(self.game_dir_edit, self._browse_game_dir))
-        form.addRow("Engine Binary", self._with_browse(self.engine_binary_edit, self._browse_engine_binary))
+        form.addRow(
+            "Game Directory",
+            self._with_browse(self.game_dir_edit, self._browse_game_dir),
+        )
+        form.addRow(
+            "Engine Binary",
+            self._with_browse(self.engine_binary_edit, self._browse_engine_binary),
+        )
         icon_controls = QVBoxLayout()
-        icon_controls.addWidget(self._icon_preview, alignment=Qt.AlignmentFlag.AlignLeft)
+        icon_controls.addWidget(
+            self._icon_preview, alignment=Qt.AlignmentFlag.AlignLeft
+        )
         icon_buttons = QHBoxLayout()
         icon_buttons.addWidget(self._change_icon_button)
         icon_buttons.addWidget(self._default_icon_button)
@@ -711,7 +761,9 @@ class CreateMachineDialog(QDialog):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         self._sections_host = QWidget()
-        self._sections_flow = FlowLayout(self._sections_host, margin=8, hspacing=12, vspacing=12)
+        self._sections_flow = FlowLayout(
+            self._sections_host, margin=8, hspacing=12, vspacing=12
+        )
         self._sections_host.setLayout(self._sections_flow)
         scroll_area.setWidget(self._sections_host)
         layout.addWidget(scroll_area)
@@ -740,20 +792,26 @@ class CreateMachineDialog(QDialog):
         return layout
 
     def _browse_game_dir(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select Game Directory", self.game_dir_edit.text().strip())
+        path = QFileDialog.getExistingDirectory(
+            self, "Select Game Directory", self.game_dir_edit.text().strip()
+        )
         if path:
             self.game_dir_edit.setText(path)
             self._update_preview()
 
     def _browse_engine_binary(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select DOSBox Binary", self.engine_binary_edit.text().strip())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select DOSBox Binary", self.engine_binary_edit.text().strip()
+        )
         if path:
             self.engine_binary_edit.setText(path)
             self._load_schema_if_possible()
 
     def _choose_icon(self) -> None:
         filters = "Icons and Images (*.png *.svg *.svgz *.xpm *.ico *.icns *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)"
-        path, _ = QFileDialog.getOpenFileName(self, "Select Icon", str(self._icon_start_dir()), filters)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Icon", str(self._icon_start_dir()), filters
+        )
         if not path:
             return
         self._icon_source = Path(path).expanduser()
@@ -785,15 +843,20 @@ class CreateMachineDialog(QDialog):
             section.name: {
                 option.name: self._profile.option_states.get(section.name, {}).get(
                     option.name,
-                    OptionState(value=option.default_value, checked=False, origin="default"),
+                    OptionState(
+                        value=option.default_value, checked=False, origin="default"
+                    ),
                 )
                 for option in section.options
             }
             for section in self._schema.sections
         }
-        self._autoexec_text = self._profile.autoexec_text or self._renderer.default_autoexec_text(
-            self._profile.game,
-            self._profile.engine.binary_path,
+        self._autoexec_text = (
+            self._profile.autoexec_text
+            or self._renderer.default_autoexec_text(
+                self._profile.game,
+                self._profile.engine.binary_path,
+            )
         )
         self._config_preview_edited = False
         self._update_icon_preview()
@@ -805,9 +868,13 @@ class CreateMachineDialog(QDialog):
         self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
         self._option_states = {
             section.name: {
-                option.name: self._import_analysis.option_states.get(section.name, {}).get(
+                option.name: self._import_analysis.option_states.get(
+                    section.name, {}
+                ).get(
                     option.name,
-                    OptionState(value=option.default_value, checked=False, origin="default"),
+                    OptionState(
+                        value=option.default_value, checked=False, origin="default"
+                    ),
                 )
                 for option in section.options
             }
@@ -843,7 +910,9 @@ class CreateMachineDialog(QDialog):
             section.name: {
                 option.name: existing_option_states.get(section.name, {}).get(
                     option.name,
-                    OptionState(value=option.default_value, checked=False, origin="default"),
+                    OptionState(
+                        value=option.default_value, checked=False, origin="default"
+                    ),
                 )
                 for option in section.options
             }
@@ -862,7 +931,11 @@ class CreateMachineDialog(QDialog):
                 ),
                 binary_path,
             )
-        if self._profile is None and self._import_analysis is None and self._engine_id is not None:
+        if (
+            self._profile is None
+            and self._import_analysis is None
+            and self._engine_id is not None
+        ):
             self._apply_engine_section_defaults()
         self._config_preview_edited = False
         self._update_icon_preview()
@@ -883,7 +956,8 @@ class CreateMachineDialog(QDialog):
         sectionless_issues = [
             issue.message
             for issue in self._import_issues
-            if issue.section_name not in {section.name for section in self._schema.sections}
+            if issue.section_name
+            not in {section.name for section in self._schema.sections}
         ]
         if sectionless_issues:
             self._sections_warning_label.setText("\n".join(sectionless_issues))
@@ -894,9 +968,15 @@ class CreateMachineDialog(QDialog):
         for section in self._schema.sections:
             button = QPushButton(self._section_button_text(section.name))
             if any(issue.section_name == section.name for issue in self._import_issues):
-                button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MessageBoxWarning))
+                button.setIcon(
+                    self.style().standardIcon(
+                        self.style().StandardPixmap.SP_MessageBoxWarning
+                    )
+                )
                 button.setStyleSheet("color: #a16207;")
-            button.clicked.connect(lambda _=False, name=section.name: self._open_section_dialog(name))
+            button.clicked.connect(
+                lambda _=False, name=section.name: self._open_section_dialog(name)
+            )
             self._section_buttons[section.name] = button
             self._sections_flow.addWidget(button)
 
@@ -905,7 +985,9 @@ class CreateMachineDialog(QDialog):
 
     def _open_section_dialog(self, section_name: str) -> None:
         if section_name == "autoexec":
-            dialog = AutoexecEditorDialog(self._autoexec_text, self._preset_service, self._engine_id, self)
+            dialog = AutoexecEditorDialog(
+                self._autoexec_text, self._preset_service, self._engine_id, self
+            )
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             self._autoexec_text = dialog.autoexec_text
@@ -913,7 +995,9 @@ class CreateMachineDialog(QDialog):
             return
         if self._schema is None:
             return
-        section = next((item for item in self._schema.sections if item.name == section_name), None)
+        section = next(
+            (item for item in self._schema.sections if item.name == section_name), None
+        )
         if section is None:
             return
         dialog = SectionEditorDialog(
@@ -921,7 +1005,11 @@ class CreateMachineDialog(QDialog):
             option_states=self._option_states[section_name],
             preset_service=self._preset_service,
             engine_id=self._engine_id,
-            issues=[issue for issue in self._import_issues if issue.section_name == section_name],
+            issues=[
+                issue
+                for issue in self._import_issues
+                if issue.section_name == section_name
+            ],
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -938,8 +1026,12 @@ class CreateMachineDialog(QDialog):
     def _save_machine_preset(self) -> None:
         if self._schema is None:
             return
-        titles = sorted(preset.title for preset in self._preset_service.load_user_machine_presets())
-        title, accepted = QInputDialog.getItem(self, "Save Machine Preset", "Preset name", titles, 0, True)
+        titles = sorted(
+            preset.title for preset in self._preset_service.load_user_machine_presets()
+        )
+        title, accepted = QInputDialog.getItem(
+            self, "Save Machine Preset", "Preset name", titles, 0, True
+        )
         if not accepted or not title.strip():
             return
         values = {
@@ -952,15 +1044,21 @@ class CreateMachineDialog(QDialog):
             if section_name not in {"autoexec", "sdl"}
         }
         self._preset_service.save_machine_preset(title.strip(), values)
-        QMessageBox.information(self, "Preset Saved", f"Saved machine preset '{title.strip()}'.")
+        QMessageBox.information(
+            self, "Preset Saved", f"Saved machine preset '{title.strip()}'."
+        )
 
     def _apply_user_machine_preset(self) -> None:
         presets = self._preset_service.load_user_machine_presets()
         if not presets:
-            QMessageBox.information(self, "No Presets", "No user machine presets have been saved yet.")
+            QMessageBox.information(
+                self, "No Presets", "No user machine presets have been saved yet."
+            )
             return
         titles = [preset.title for preset in presets]
-        title, accepted = QInputDialog.getItem(self, "Apply User Preset", "Preset", titles, 0, False)
+        title, accepted = QInputDialog.getItem(
+            self, "Apply User Preset", "Preset", titles, 0, False
+        )
         if not accepted or not title:
             return
         preset = next(item for item in presets if item.title == title)
@@ -969,10 +1067,15 @@ class CreateMachineDialog(QDialog):
     def _apply_system_machine_preset(self) -> None:
         presets = self._preset_service.load_system_machine_presets()
         if not presets:
-            QMessageBox.information(self, "No Presets", "No shipped system presets are available.")
+            QMessageBox.information(
+                self, "No Presets", "No shipped system presets are available."
+            )
             return
         dialog = SystemPresetBrowserDialog(presets, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.selected_preset is None:
+        if (
+            dialog.exec() != QDialog.DialogCode.Accepted
+            or dialog.selected_preset is None
+        ):
             return
         self._apply_machine_preset_values(dialog.selected_preset)
 
@@ -1008,20 +1111,29 @@ class CreateMachineDialog(QDialog):
         else:
             machine_id = "preview"
             from dos_machines.domain.models import UiState, Provenance
+
             ui_state = UiState()
             provenance = Provenance()
         from dos_machines.domain.models import GameTargets, PresetRef, ProfileIdentity
 
         game_dir = Path(self.game_dir_edit.text().strip() or ".").expanduser()
         return MachineProfile(
-            identity=ProfileIdentity(machine_id=machine_id, title=self.title_edit.text().strip() or "Preview"),
+            identity=ProfileIdentity(
+                machine_id=machine_id, title=self.title_edit.text().strip() or "Preview"
+            ),
             engine=cache.ref,
             preset=PresetRef(preset_id="manual", start_mode="manual"),
             game=GameTargets(
                 game_dir=game_dir,
                 working_dir=game_dir,
-                executable=self._profile.game.executable if self._profile is not None else self._import_analysis.executable if self._import_analysis is not None else "",
-                setup_executable=self._profile.game.setup_executable if self._profile is not None else None,
+                executable=self._profile.game.executable
+                if self._profile is not None
+                else self._import_analysis.executable
+                if self._import_analysis is not None
+                else "",
+                setup_executable=self._profile.game.setup_executable
+                if self._profile is not None
+                else None,
             ),
             ui=ui_state,
             option_states=self._option_states,
@@ -1036,7 +1148,9 @@ class CreateMachineDialog(QDialog):
         if preview_profile is None or self._schema is None:
             self._set_config_preview_text("")
             return
-        self._set_config_preview_text(self._renderer.render(preview_profile, self._schema))
+        self._set_config_preview_text(
+            self._renderer.render(preview_profile, self._schema)
+        )
 
     def _set_config_preview_text(self, text: str) -> None:
         self._updating_config_preview = True
@@ -1051,10 +1165,14 @@ class CreateMachineDialog(QDialog):
 
     def _validate_before_accept(self) -> None:
         if not self.title_edit.text().strip() or not self.game_dir_edit.text().strip():
-            QMessageBox.warning(self, "Missing Fields", "Title and game directory are required.")
+            QMessageBox.warning(
+                self, "Missing Fields", "Title and game directory are required."
+            )
             return
         if self._schema is None:
-            QMessageBox.warning(self, "Schema Not Loaded", "Load the engine schema before saving.")
+            QMessageBox.warning(
+                self, "Schema Not Loaded", "Load the engine schema before saving."
+            )
             return
         if self._import_analysis is not None and self._import_service is not None:
             self._reanalyse_raw_import()
@@ -1073,7 +1191,9 @@ class CreateMachineDialog(QDialog):
         current_raw_text = self._raw_import_edit.toPlainText()
         if current_raw_text == self._last_reanalysed_raw_text:
             return
-        latest = self._import_service.analyse_text(current_raw_text, self._import_analysis.config_path)
+        latest = self._import_service.analyse_text(
+            current_raw_text, self._import_analysis.config_path
+        )
         self._import_analysis = latest
         self._import_issues = list(latest.issues)
         self._last_reanalysed_raw_text = current_raw_text
@@ -1086,7 +1206,9 @@ class CreateMachineDialog(QDialog):
         self._rebuild_sections_overview()
 
     def _section_button_text(self, section_name: str) -> str:
-        issue_count = sum(1 for issue in self._import_issues if issue.section_name == section_name)
+        issue_count = sum(
+            1 for issue in self._import_issues if issue.section_name == section_name
+        )
         if issue_count:
             return f"{section_name} ({issue_count})"
         return section_name
@@ -1099,15 +1221,27 @@ class CreateMachineDialog(QDialog):
             if issue.section_name != section.name or issue.option_name is None:
                 remaining.append(issue)
                 continue
-            option = next((item for item in section.options if item.name == issue.option_name), None)
+            option = next(
+                (item for item in section.options if item.name == issue.option_name),
+                None,
+            )
             state = self._option_states.get(section.name, {}).get(issue.option_name)
             if option is None or state is None:
                 remaining.append(issue)
                 continue
-            if option.value_type == "boolean" and state.value.lower() not in {"true", "false", "1", "0"}:
+            if option.value_type == "boolean" and state.value.lower() not in {
+                "true",
+                "false",
+                "1",
+                "0",
+            }:
                 remaining.append(issue)
                 continue
-            if option.value_type in {"enum", "dynamic"} and option.choices and state.value not in option.choices:
+            if (
+                option.value_type in {"enum", "dynamic"}
+                and option.choices
+                and state.value not in option.choices
+            ):
                 remaining.append(issue)
                 continue
         self._import_issues = remaining
@@ -1116,7 +1250,9 @@ class CreateMachineDialog(QDialog):
     def _apply_engine_section_defaults(self) -> None:
         assert self._engine_id is not None
         for section_name, options in self._option_states.items():
-            values = self._preset_service.load_section_default(self._engine_id, section_name)
+            values = self._preset_service.load_section_default(
+                self._engine_id, section_name
+            )
             if not values:
                 continue
             for option_name, value in values.items():
@@ -1126,7 +1262,9 @@ class CreateMachineDialog(QDialog):
                 state.value = value
                 state.checked = True
                 state.origin = "default-preset"
-        autoexec_default = self._preset_service.load_section_default(self._engine_id, "autoexec")
+        autoexec_default = self._preset_service.load_section_default(
+            self._engine_id, "autoexec"
+        )
         if autoexec_default and "__text__" in autoexec_default:
             self._autoexec_text = autoexec_default["__text__"]
 
@@ -1144,7 +1282,10 @@ class CreateMachineDialog(QDialog):
         game_dir = Path(game_dir_text).expanduser()
         profile_path = game_dir / ".dosmachines" / "profile.json"
         config_path = game_dir / ".dosmachines" / "dosbox.conf"
-        if self._recovered_profile_path == profile_path or self._recovered_config_path == config_path:
+        if (
+            self._recovered_profile_path == profile_path
+            or self._recovered_config_path == config_path
+        ):
             return
         self._recovered_profile_path = None
         self._recovered_config_path = None
@@ -1206,7 +1347,11 @@ class CreateMachineDialog(QDialog):
         icon = None
         if self._icon_source is not None:
             icon = QIcon(str(self._icon_source))
-        elif self._profile is not None and self._profile.ui.icon_path is not None and not self._remove_icon:
+        elif (
+            self._profile is not None
+            and self._profile.ui.icon_path is not None
+            and not self._remove_icon
+        ):
             icon = QIcon(str(self._profile.ui.icon_path))
         if icon is None or icon.isNull():
             icon = QIcon.fromTheme("applications-games")

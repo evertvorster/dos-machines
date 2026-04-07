@@ -20,21 +20,18 @@ class AppPaths:
     settings_path: Path
     engines_root: Path
     presets_root: Path
-    icons_root: Path
     default_workspace: Path
 
 
 @dataclass(slots=True)
 class Settings:
     workspace_path: Path
-    recent_workspaces: list[Path] = field(default_factory=list)
     last_engine_binary_path: Path | None = None
     workspace_icon_size: int = 64
 
     def to_json(self) -> dict[str, Any]:
         return {
             "workspace_path": str(self.workspace_path),
-            "recent_workspaces": [str(path) for path in self.recent_workspaces],
             "last_engine_binary_path": _path_to_str(self.last_engine_binary_path),
             "workspace_icon_size": self.workspace_icon_size,
         }
@@ -42,11 +39,11 @@ class Settings:
     @classmethod
     def from_json(cls, payload: dict[str, Any], default_workspace: Path) -> "Settings":
         workspace_path = Path(payload.get("workspace_path", default_workspace))
-        recent = [Path(path) for path in payload.get("recent_workspaces", [])]
         return cls(
             workspace_path=workspace_path,
-            recent_workspaces=recent,
-            last_engine_binary_path=_path_from_str(payload.get("last_engine_binary_path")),
+            last_engine_binary_path=_path_from_str(
+                payload.get("last_engine_binary_path")
+            ),
             workspace_icon_size=int(payload.get("workspace_icon_size", 64)),
         )
 
@@ -149,7 +146,9 @@ class SchemaSection:
     def from_json(cls, payload: dict[str, Any]) -> "SchemaSection":
         return cls(
             name=payload["name"],
-            options=[SchemaOption.from_json(item) for item in payload.get("options", [])],
+            options=[
+                SchemaOption.from_json(item) for item in payload.get("options", [])
+            ],
         )
 
 
@@ -171,7 +170,9 @@ class EngineSchema:
         return cls(
             engine_id=payload["engine_id"],
             display_name=payload["display_name"],
-            sections=[SchemaSection.from_json(item) for item in payload.get("sections", [])],
+            sections=[
+                SchemaSection.from_json(item) for item in payload.get("sections", [])
+            ],
         )
 
 
@@ -347,33 +348,9 @@ class MachineProfile:
 
 
 @dataclass(slots=True)
-class SectionPreset:
-    preset_id: str
-    title: str
-    section_name: str
-    sections: dict[str, dict[str, str]]
-
-    def to_json(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_json(cls, payload: dict[str, Any]) -> "SectionPreset":
-        return cls(
-            preset_id=payload["preset_id"],
-            title=payload["title"],
-            section_name=payload["section_name"],
-            sections={
-                section: {name: str(value) for name, value in options.items()}
-                for section, options in payload.get("sections", {}).items()
-            },
-        )
-
-
-@dataclass(slots=True)
 class MachinePreset:
     preset_id: str
     title: str
-    section_preset_ids: list[str] = field(default_factory=list)
     source: str = "user"
     tier: str = ""
     description: str = ""
@@ -390,7 +367,6 @@ class MachinePreset:
         return cls(
             preset_id=payload["preset_id"],
             title=payload["title"],
-            section_preset_ids=list(payload.get("section_preset_ids", [])),
             source=payload.get("source", "user"),
             tier=payload.get("tier", ""),
             description=payload.get("description", ""),
