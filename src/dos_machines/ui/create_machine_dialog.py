@@ -834,14 +834,33 @@ class CreateMachineDialog(QDialog):
                 return game_dir
         return Path.home()
 
-    def _load_schema_from_profile(self) -> None:
-        assert self._profile is not None
-        cache = self._engine_registry.register(self._profile.engine.binary_path)
-        self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
-        self._engine_id = cache.ref.engine_id
-        self._option_states = {
+    def _bootstrap_schema(
+        self, binary_path: Path, *, persist_last_engine: bool, silent: bool = False
+    ) -> bool:
+        try:
+            cache = self._engine_registry.register(binary_path)
+            self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
+            self._engine_id = cache.ref.engine_id
+            if persist_last_engine:
+                settings = self._settings_service.load()
+                settings.last_engine_binary_path = binary_path
+                self._settings_service.save(settings)
+        except Exception as exc:
+            self._schema = None
+            self._engine_id = None
+            if not silent:
+                QMessageBox.critical(self, "Engine Load Failed", str(exc))
+            return False
+        return True
+
+    def _build_option_states(
+        self,
+        source: dict[str, dict[str, OptionState]],
+    ) -> dict[str, dict[str, OptionState]]:
+        assert self._schema is not None
+        return {
             section.name: {
-                option.name: self._profile.option_states.get(section.name, {}).get(
+                option.name: source.get(section.name, {}).get(
                     option.name,
                     OptionState(
                         value=option.default_value, checked=False, origin="default"
@@ -851,6 +870,19 @@ class CreateMachineDialog(QDialog):
             }
             for section in self._schema.sections
         }
+
+    def _finalize_schema_load(self) -> None:
+        self._config_preview_edited = False
+        self._update_icon_preview()
+        self._rebuild_sections_overview()
+
+    def _load_schema_from_profile(self) -> None:
+        assert self._profile is not None
+        if not self._bootstrap_schema(
+            self._profile.engine.binary_path, persist_last_engine=False
+        ):
+            return
+        self._option_states = self._build_option_states(self._profile.option_states)
         self._autoexec_text = (
             self._profile.autoexec_text
             or self._renderer.default_autoexec_text(
@@ -858,32 +890,19 @@ class CreateMachineDialog(QDialog):
                 self._profile.engine.binary_path,
             )
         )
-        self._config_preview_edited = False
-        self._update_icon_preview()
-        self._rebuild_sections_overview()
+        self._finalize_schema_load()
 
     def _load_schema_from_import(self) -> None:
         assert self._import_analysis is not None
-        cache = self._engine_registry.register(self._import_analysis.engine_binary)
-        self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
-        self._option_states = {
-            section.name: {
-                option.name: self._import_analysis.option_states.get(
-                    section.name, {}
-                ).get(
-                    option.name,
-                    OptionState(
-                        value=option.default_value, checked=False, origin="default"
-                    ),
-                )
-                for option in section.options
-            }
-            for section in self._schema.sections
-        }
+        if not self._bootstrap_schema(
+            self._import_analysis.engine_binary, persist_last_engine=False
+        ):
+            return
+        self._option_states = self._build_option_states(
+            self._import_analysis.option_states
+        )
         self._autoexec_text = self._import_analysis.autoexec_text
-        self._config_preview_edited = False
-        self._update_icon_preview()
-        self._rebuild_sections_overview()
+        self._finalize_schema_load()
 
     def _load_schema_if_possible(self, silent: bool = False) -> None:
         binary_path = Path(self.engine_binary_edit.text().strip()).expanduser()
@@ -893,31 +912,12 @@ class CreateMachineDialog(QDialog):
             self._option_states = {}
             self._rebuild_sections_overview()
             return
-        try:
-            cache = self._engine_registry.register(binary_path)
-            self._schema = self._engine_registry.load_schema(cache.ref.engine_id)
-            self._engine_id = cache.ref.engine_id
-            settings = self._settings_service.load()
-            settings.last_engine_binary_path = binary_path
-            self._settings_service.save(settings)
-        except Exception as exc:
-            if not silent:
-                QMessageBox.critical(self, "Engine Load Failed", str(exc))
+        if not self._bootstrap_schema(
+            binary_path, persist_last_engine=True, silent=silent
+        ):
             return
 
-        existing_option_states = self._option_states
-        self._option_states = {
-            section.name: {
-                option.name: existing_option_states.get(section.name, {}).get(
-                    option.name,
-                    OptionState(
-                        value=option.default_value, checked=False, origin="default"
-                    ),
-                )
-                for option in section.options
-            }
-            for section in self._schema.sections
-        }
+        self._option_states = self._build_option_states(self._option_states)
         if not self._autoexec_text:
             from dos_machines.domain.models import GameTargets
 
@@ -937,9 +937,7 @@ class CreateMachineDialog(QDialog):
             and self._engine_id is not None
         ):
             self._apply_engine_section_defaults()
-        self._config_preview_edited = False
-        self._update_icon_preview()
-        self._rebuild_sections_overview()
+        self._finalize_schema_load()
 
     def _rebuild_sections_overview(self) -> None:
         while self._sections_flow.count():

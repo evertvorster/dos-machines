@@ -10,7 +10,10 @@ from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 from dos_machines.application.config_renderer import ConfigRenderer
 from dos_machines.application.engine_registry import EngineRegistry
 from dos_machines.application.import_service import ImportService
-from dos_machines.application.profile_service import CreateProfileRequest, ProfileService
+from dos_machines.application.profile_service import (
+    CreateProfileRequest,
+    ProfileService,
+)
 from dos_machines.application.preset_service import PresetService
 from dos_machines.application.settings_service import SettingsService
 from dos_machines.domain.models import OptionState, SchemaOption, SchemaSection
@@ -23,11 +26,13 @@ from dos_machines.ui.create_machine_dialog import (
 )
 
 
-def _fake_binary(path: Path, version_output: str = "dosbox-staging, version 0.82.2") -> Path:
+def _fake_binary(
+    path: Path, version_output: str = "dosbox-staging, version 0.82.2"
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "#!/bin/sh\n"
-        "if [ \"$1\" = \"--list-glshaders\" ]; then\n"
+        'if [ "$1" = "--list-glshaders" ]; then\n'
         "  echo crt-auto\n"
         "  echo sharp\n"
         "  exit 0\n"
@@ -52,10 +57,16 @@ def test_new_machine_applies_engine_scoped_section_defaults(tmp_path: Path) -> N
     engine_registry = EngineRegistry(settings_service.app_paths)
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
-    preset_service.save_section_default(cache.ref.engine_id, "sdl", {"fullscreen": "true"})
-    preset_service.save_section_default(cache.ref.engine_id, "autoexec", {"__text__": "mount c \".\"\nc:"})
+    preset_service.save_section_default(
+        cache.ref.engine_id, "sdl", {"fullscreen": "true"}
+    )
+    preset_service.save_section_default(
+        cache.ref.engine_id, "autoexec", {"__text__": 'mount c "."\nc:'}
+    )
 
-    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace", settings_service, engine_registry, preset_service
+    )
     dialog.engine_binary_edit.setText(str(binary))
     dialog.game_dir_edit.setText(str(tmp_path / "game"))
     dialog._load_schema_if_possible()
@@ -65,17 +76,23 @@ def test_new_machine_applies_engine_scoped_section_defaults(tmp_path: Path) -> N
     assert dialog._autoexec_text == 'mount c "."\nc:'
 
 
-def test_existing_machine_does_not_apply_engine_scoped_section_defaults(tmp_path: Path) -> None:
+def test_existing_machine_does_not_apply_engine_scoped_section_defaults(
+    tmp_path: Path,
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
     schema = engine_registry.load_schema(cache.ref.engine_id)
-    preset_service.save_section_default(cache.ref.engine_id, "sdl", {"fullscreen": "true"})
+    preset_service.save_section_default(
+        cache.ref.engine_id, "sdl", {"fullscreen": "true"}
+    )
 
     profile = profile_service.create(
         CreateProfileRequest(
@@ -87,9 +104,13 @@ def test_existing_machine_does_not_apply_engine_scoped_section_defaults(tmp_path
             option_states={
                 section.name: {
                     option.name: OptionState(
-                        value="false" if section.name == "sdl" and option.name == "fullscreen" else option.default_value,
+                        value="false"
+                        if section.name == "sdl" and option.name == "fullscreen"
+                        else option.default_value,
                         checked=section.name == "sdl" and option.name == "fullscreen",
-                        origin="user" if section.name == "sdl" and option.name == "fullscreen" else "default",
+                        origin="user"
+                        if section.name == "sdl" and option.name == "fullscreen"
+                        else "default",
                     )
                     for option in section.options
                 }
@@ -117,7 +138,9 @@ def test_icon_selection_prefers_capture_directory(tmp_path: Path) -> None:
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace", settings_service, engine_registry, preset_service
+    )
 
     game_dir = tmp_path / "game"
     capture_dir = game_dir / ".dosmachines" / "capture"
@@ -127,13 +150,17 @@ def test_icon_selection_prefers_capture_directory(tmp_path: Path) -> None:
     assert dialog._icon_start_dir() == capture_dir
 
 
-def test_existing_profile_does_not_resubmit_current_icon_as_new_source(tmp_path: Path) -> None:
+def test_existing_profile_does_not_resubmit_current_icon_as_new_source(
+    tmp_path: Path,
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
     schema = engine_registry.load_schema(cache.ref.engine_id)
@@ -150,7 +177,9 @@ def test_existing_profile_does_not_resubmit_current_icon_as_new_source(tmp_path:
             workspace_dir=tmp_path / "workspace",
             option_states={
                 section.name: {
-                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    option.name: OptionState(
+                        value=option.default_value, checked=True, origin="default"
+                    )
                     for option in section.options
                 }
                 for section in schema.sections
@@ -160,7 +189,13 @@ def test_existing_profile_does_not_resubmit_current_icon_as_new_source(tmp_path:
     )
     profile.ui.icon_path = managed_icon
 
-    dialog = CreateMachineDialog(tmp_path / "workspace", settings_service, engine_registry, preset_service, profile=profile)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        profile=profile,
+    )
     request = dialog.build_request()
 
     assert request.icon_source is None
@@ -226,7 +261,10 @@ def test_section_editor_expands_and_collapses_multiline_help(tmp_path: Path) -> 
 
     assert not widget._details_label.isHidden()
     assert widget._toggle_button.arrowType() == Qt.ArrowType.DownArrow
-    assert widget._details_label.text() == "<b>auto:</b> The default mode.<br><b>Possible values:</b> auto, dynamic"
+    assert (
+        widget._details_label.text()
+        == "<b>auto:</b> The default mode.<br><b>Possible values:</b> auto, dynamic"
+    )
 
     widget._toggle_button.click()
 
@@ -259,7 +297,9 @@ def test_section_editor_keeps_single_line_help_expanded(tmp_path: Path) -> None:
 
     assert dialog.findChildren(CollapsibleHelpWidget) == []
     assert dialog.findChildren(QToolButton) == []
-    assert "Type of CPU emulation core to use." in [label.text() for label in dialog.findChildren(QLabel)]
+    assert "Type of CPU emulation core to use." in [
+        label.text() for label in dialog.findChildren(QLabel)
+    ]
 
 
 def test_no_wheel_combo_box_never_changes_value() -> None:
@@ -285,13 +325,17 @@ def test_no_wheel_combo_box_never_changes_value() -> None:
     assert not event.isAccepted()
 
 
-def test_recovery_dialog_hydrates_existing_profile_when_game_dir_is_corrected(tmp_path: Path) -> None:
+def test_recovery_dialog_hydrates_existing_profile_when_game_dir_is_corrected(
+    tmp_path: Path,
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
     schema = engine_registry.load_schema(cache.ref.engine_id)
@@ -305,7 +349,9 @@ def test_recovery_dialog_hydrates_existing_profile_when_game_dir_is_corrected(tm
             workspace_dir=tmp_path / "workspace",
             option_states={
                 section.name: {
-                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    option.name: OptionState(
+                        value=option.default_value, checked=True, origin="default"
+                    )
                     for option in section.options
                 }
                 for section in schema.sections
@@ -328,16 +374,23 @@ def test_recovery_dialog_hydrates_existing_profile_when_game_dir_is_corrected(tm
 
     assert dialog.title_edit.text() == "Recovered Machine"
     assert dialog.engine_binary_edit.text() == str(binary)
-    assert request.existing_profile_path == profile.game.game_dir / ".dosmachines" / "profile.json"
+    assert (
+        request.existing_profile_path
+        == profile.game.game_dir / ".dosmachines" / "profile.json"
+    )
 
 
-def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(tmp_path: Path) -> None:
+def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(
+    tmp_path: Path,
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     cache = engine_registry.register(binary)
     schema = engine_registry.load_schema(cache.ref.engine_id)
@@ -352,7 +405,9 @@ def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(tmp_pat
             workspace_dir=tmp_path / "workspace",
             option_states={
                 section.name: {
-                    option.name: OptionState(value=option.default_value, checked=True, origin="default")
+                    option.name: OptionState(
+                        value=option.default_value, checked=True, origin="default"
+                    )
                     for option in section.options
                 }
                 for section in schema.sections
@@ -362,7 +417,10 @@ def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(tmp_pat
     )
     moved_profile_path = moved_dir / ".dosmachines" / "profile.json"
     moved_profile_path.parent.mkdir(parents=True)
-    moved_profile_path.write_text((original_dir / ".dosmachines" / "profile.json").read_text(encoding="utf-8"), encoding="utf-8")
+    moved_profile_path.write_text(
+        (original_dir / ".dosmachines" / "profile.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
     dialog = CreateMachineDialog(
         tmp_path / "workspace",
@@ -381,13 +439,17 @@ def test_recovery_dialog_normalizes_loaded_profile_to_selected_directory(tmp_pat
     assert request.existing_profile_path == moved_profile_path
 
 
-def test_recovery_dialog_reloads_managed_config_when_profile_is_missing(tmp_path: Path, monkeypatch) -> None:
+def test_recovery_dialog_reloads_managed_config_when_profile_is_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     import_service = ImportService(engine_registry, profile_service)
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     engine_registry.register(binary)
@@ -434,13 +496,17 @@ def test_recovery_dialog_reloads_managed_config_when_profile_is_missing(tmp_path
     assert request.existing_profile_path is None
 
 
-def test_import_dialog_allows_save_with_only_non_blocking_issues(tmp_path: Path, monkeypatch) -> None:
+def test_import_dialog_allows_save_with_only_non_blocking_issues(
+    tmp_path: Path, monkeypatch
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
     preset_service = PresetService(settings_service.app_paths)
     engine_registry = EngineRegistry(settings_service.app_paths)
-    profile_service = ProfileService(settings_service.app_paths, engine_registry, ConfigRenderer())
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
     import_service = ImportService(engine_registry, profile_service)
     binary = _fake_binary(tmp_path / "bin" / "dosbox")
     monkeypatch.setenv("PATH", f"{binary.parent}:{os.environ.get('PATH', '')}")
@@ -448,11 +514,7 @@ def test_import_dialog_allows_save_with_only_non_blocking_issues(tmp_path: Path,
     config_path = tmp_path / "game" / "dosbox.conf"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
-        "[sdl]\n"
-        "fullscreen = true\n"
-        "\n"
-        "[soundcanvas]\n"
-        "foo = bar\n",
+        "[sdl]\nfullscreen = true\n\n[soundcanvas]\nfoo = bar\n",
         encoding="utf-8",
     )
     analysis = import_service.analyse_config(config_path)
@@ -473,6 +535,97 @@ def test_import_dialog_allows_save_with_only_non_blocking_issues(tmp_path: Path,
     dialog._validate_before_accept()
 
     assert accepted["called"] is True
+
+
+def test_import_dialog_sets_engine_id_and_preserves_imported_values(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
+    import_service = ImportService(engine_registry, profile_service)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    preset_service.save_section_default(
+        cache.ref.engine_id, "sdl", {"fullscreen": "false"}
+    )
+    monkeypatch.setenv("PATH", f"{binary.parent}:{os.environ.get('PATH', '')}")
+
+    config_path = tmp_path / "game" / "dosbox.conf"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[sdl]\nfullscreen = true\n\n[autoexec]\nmount c .\nc:\n",
+        encoding="utf-8",
+    )
+    analysis = import_service.analyse_config(config_path)
+
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        import_service=import_service,
+        import_analysis=analysis,
+    )
+
+    assert dialog._engine_id == cache.ref.engine_id
+    assert dialog._option_states["sdl"]["fullscreen"].value == "true"
+    assert dialog._option_states["sdl"]["fullscreen"].origin == "imported"
+
+
+def test_import_dialog_section_default_save_uses_loaded_engine_id(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
+    import_service = ImportService(engine_registry, profile_service)
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    monkeypatch.setenv("PATH", f"{binary.parent}:{os.environ.get('PATH', '')}")
+
+    config_path = tmp_path / "game" / "dosbox.conf"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("[sdl]\nfullscreen = true\n", encoding="utf-8")
+    analysis = import_service.analyse_config(config_path)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        import_service=import_service,
+        import_analysis=analysis,
+    )
+
+    monkeypatch.setattr(
+        "dos_machines.ui.create_machine_dialog.QMessageBox.information",
+        lambda *args, **kwargs: None,
+    )
+
+    section = next(
+        section for section in dialog._schema.sections if section.name == "sdl"
+    )
+    section_dialog = SectionEditorDialog(
+        section,
+        dialog._option_states["sdl"],
+        preset_service,
+        engine_id=dialog._engine_id,
+    )
+    section_dialog._save_section_default()
+
+    assert preset_service.load_section_default(cache.ref.engine_id, "sdl") == {
+        "fullscreen": "true"
+    }
 
 
 def test_build_request_uses_edited_config_preview_text(tmp_path: Path) -> None:
@@ -501,7 +654,9 @@ def test_build_request_uses_edited_config_preview_text(tmp_path: Path) -> None:
     assert request.raw_config_text == edited_config
 
 
-def test_saving_machine_preset_from_dialog_omits_sdl_and_autoexec(tmp_path: Path, monkeypatch) -> None:
+def test_saving_machine_preset_from_dialog_omits_sdl_and_autoexec(
+    tmp_path: Path, monkeypatch
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
@@ -541,7 +696,9 @@ def test_saving_machine_preset_from_dialog_omits_sdl_and_autoexec(tmp_path: Path
     assert resolved["midi"]["mididevice"] == "mt32"
 
 
-def test_applying_user_machine_preset_keeps_current_sdl(tmp_path: Path, monkeypatch) -> None:
+def test_applying_user_machine_preset_keeps_current_sdl(
+    tmp_path: Path, monkeypatch
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
@@ -559,7 +716,9 @@ def test_applying_user_machine_preset_keeps_current_sdl(tmp_path: Path, monkeypa
     dialog._load_schema_if_possible()
     dialog._option_states["sdl"]["fullscreen"].value = "false"
     dialog._option_states["sdl"]["fullscreen"].checked = True
-    preset_service.save_machine_preset("Preset A", {"sdl": {"fullscreen": "true"}, "midi": {"mididevice": "mt32"}})
+    preset_service.save_machine_preset(
+        "Preset A", {"sdl": {"fullscreen": "true"}, "midi": {"mididevice": "mt32"}}
+    )
 
     monkeypatch.setattr(
         "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
@@ -571,7 +730,9 @@ def test_applying_user_machine_preset_keeps_current_sdl(tmp_path: Path, monkeypa
     assert dialog._option_states["midi"]["mididevice"].value == "mt32"
 
 
-def test_applying_user_machine_preset_keeps_current_autoexec(tmp_path: Path, monkeypatch) -> None:
+def test_applying_user_machine_preset_keeps_current_autoexec(
+    tmp_path: Path, monkeypatch
+) -> None:
     _app()
     settings_service = SettingsService(config_root=tmp_path / "config")
     settings_service.load()
@@ -588,7 +749,13 @@ def test_applying_user_machine_preset_keeps_current_autoexec(tmp_path: Path, mon
     dialog.game_dir_edit.setText(str(tmp_path / "game"))
     dialog._load_schema_if_possible()
     dialog._autoexec_text = "mount c current\nc:"
-    preset_service.save_machine_preset("Preset A", {"autoexec": {"__text__": "mount c preset\nc:"}, "midi": {"mididevice": "mt32"}})
+    preset_service.save_machine_preset(
+        "Preset A",
+        {
+            "autoexec": {"__text__": "mount c preset\nc:"},
+            "midi": {"mididevice": "mt32"},
+        },
+    )
 
     monkeypatch.setattr(
         "dos_machines.ui.create_machine_dialog.QInputDialog.getItem",
@@ -633,7 +800,8 @@ def test_applying_system_machine_preset_keeps_current_sdl(tmp_path: Path) -> Non
     dialog._option_states["sdl"]["fullscreen"].checked = True
 
     preset = next(
-        item for item in preset_service.load_system_machine_presets()
+        item
+        for item in preset_service.load_system_machine_presets()
         if item.preset_id == "486_vga_sb_mt32"
     )
     dialog._apply_machine_preset_values(preset)
@@ -663,7 +831,8 @@ def test_applying_system_machine_preset_keeps_current_autoexec(tmp_path: Path) -
     dialog._autoexec_text = "mount c current\nc:"
 
     preset = next(
-        item for item in preset_service.load_system_machine_presets()
+        item
+        for item in preset_service.load_system_machine_presets()
         if item.preset_id == "486_vga_sb_mt32"
     )
     dialog._apply_machine_preset_values(preset)
