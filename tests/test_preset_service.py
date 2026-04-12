@@ -77,10 +77,14 @@ def test_system_machine_presets_are_available_with_metadata(tmp_path: Path) -> N
 
     ids = {preset.preset_id for preset in presets}
     assert "ibm_pc_1981_cga_speaker" in ids
+    assert "ibm_pc_1981_hercules" in ids
     assert "486_vga_sb_mt32" in ids
     assert all(preset.source == "system" for preset in presets)
     assert any(preset.key_facts for preset in presets)
     assert any(preset.description for preset in presets)
+    hercules = preset_service.resolve_machine_preset("ibm_pc_1981_hercules")
+    assert hercules["dosbox"]["machine"] == "hercules"
+    assert hercules["speaker"]["pcspeaker"] == "true"
     resolved = preset_service.resolve_machine_preset("486_vga_sb_mt32")
     assert resolved["cpu"]["cputype"] == "486"
     assert resolved["cpu"]["cpu_cycles"] == "25000"

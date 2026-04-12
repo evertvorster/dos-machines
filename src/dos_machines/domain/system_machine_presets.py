@@ -45,6 +45,26 @@ SYSTEM_MACHINE_PRESETS: list[MachinePreset] = [
         ],
     ),
     MachinePreset(
+        preset_id="ibm_pc_1981_hercules",
+        title="IBM PC Hercules (1981)",
+        source="system",
+        tier="Tier 1 - Early PC",
+        description="Early IBM PC-class monochrome machine for software that expects Hercules graphics or business-PC display behavior.",
+        key_facts=[
+            "CPU: Intel 8088 at 4.77 MHz",
+            "Graphics: Hercules monochrome, 720x348 high-resolution text/graphics",
+            "Sound: PC speaker only",
+        ],
+        rationale=[
+            "Targets titles and utilities with native Hercules support.",
+            "Represents the common monochrome business-PC branch alongside CGA-era XT systems.",
+        ],
+        sources=[
+            "Hercules Graphics Card technical references",
+            "DOS compatibility notes for Hercules-capable software",
+        ],
+    ),
+    MachinePreset(
         preset_id="ibm_pcjr_1983",
         title="IBM PCjr (1983)",
         source="system",
