@@ -723,12 +723,13 @@ class CreateMachineDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         form = QFormLayout()
-        form.addRow("Title", self.title_edit)
+        form.addRow(
+            "Title",
+            self._with_button(self.title_edit, self._media_button),
+        )
         form.addRow(
             "Game Directory",
-            self._with_browse(
-                self.game_dir_edit, self._browse_game_dir, self._media_button
-            ),
+            self._with_browse(self.game_dir_edit, self._browse_game_dir),
         )
         form.addRow(
             "Engine Binary",
@@ -793,11 +794,15 @@ class CreateMachineDialog(QDialog):
     ) -> QHBoxLayout:
         button = QPushButton("Browse…")
         button.clicked.connect(callback)
+        return self._with_button(line_edit, button, *extra_buttons)
+
+    def _with_button(
+        self, line_edit: QLineEdit, *buttons: QPushButton
+    ) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.addWidget(line_edit)
-        layout.addWidget(button)
-        for extra_button in extra_buttons:
-            layout.addWidget(extra_button)
+        for button in buttons:
+            layout.addWidget(button)
         return layout
 
     def _browse_game_dir(self) -> None:
