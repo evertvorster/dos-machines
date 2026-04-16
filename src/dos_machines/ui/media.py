@@ -5,10 +5,13 @@ import shutil
 import subprocess
 
 
-def launch_media_manager(media_dir: Path) -> None:
+def launch_media_manager(media_dir: Path, game_dir: Path) -> None:
     dolphin = shutil.which("dolphin")
     if dolphin:
-        subprocess.Popen([dolphin, str(media_dir)], start_new_session=True)
+        subprocess.Popen(
+            [dolphin, "--new-window", "--split", str(media_dir), str(game_dir)],
+            start_new_session=True,
+        )
         return
     opener = shutil.which("xdg-open")
     if opener:

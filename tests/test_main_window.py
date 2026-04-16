@@ -172,7 +172,13 @@ def test_open_machine_media_creates_media_dir_and_uses_dolphin(tmp_path: Path, m
 
     assert media_dir.exists()
     args, kwargs = popen.call_args
-    assert args[0] == ["/usr/bin/dolphin", str(media_dir)]
+    assert args[0] == [
+        "/usr/bin/dolphin",
+        "--new-window",
+        "--split",
+        str(media_dir),
+        str(profile.game.game_dir),
+    ]
     assert kwargs["start_new_session"] is True
 
 

@@ -761,10 +761,11 @@ class MainWindow(QMainWindow):
         if entry.profile_path is None or not entry.profile_path.exists():
             QMessageBox.warning(self, "Broken Machine", f"Missing profile: {entry.profile_path}")
             return
-        media_dir = self._profile_service.media_dir_for_game(entry.profile_path.parent.parent)
+        game_dir = entry.profile_path.parent.parent
+        media_dir = self._profile_service.media_dir_for_game(game_dir)
         media_dir.mkdir(parents=True, exist_ok=True)
         try:
-            launch_media_manager(media_dir)
+            launch_media_manager(media_dir, game_dir)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Open Media Failed", str(exc))
 

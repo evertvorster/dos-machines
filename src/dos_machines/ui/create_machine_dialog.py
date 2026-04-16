@@ -833,7 +833,7 @@ class CreateMachineDialog(QDialog):
         )
         try:
             media_dir.mkdir(parents=True, exist_ok=True)
-            launch_media_manager(media_dir)
+            launch_media_manager(media_dir, game_dir)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Open Media Failed", str(exc))
 

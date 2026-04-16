@@ -182,7 +182,13 @@ def test_new_machine_media_creates_media_dir_and_uses_dolphin(
 
     assert media_dir.exists()
     args, kwargs = popen.call_args
-    assert args[0] == ["/usr/bin/dolphin", str(media_dir)]
+    assert args[0] == [
+        "/usr/bin/dolphin",
+        "--new-window",
+        "--split",
+        str(media_dir),
+        str(game_dir),
+    ]
     assert kwargs["start_new_session"] is True
 
 
@@ -338,7 +344,13 @@ def test_configure_machine_media_uses_edited_game_dir(
 
     assert media_dir.exists()
     args, _ = popen.call_args
-    assert args[0] == ["/usr/bin/dolphin", str(media_dir)]
+    assert args[0] == [
+        "/usr/bin/dolphin",
+        "--new-window",
+        "--split",
+        str(media_dir),
+        str(moved_dir),
+    ]
 
 
 def test_section_editor_collapses_multiline_help_by_default(tmp_path: Path) -> None:
