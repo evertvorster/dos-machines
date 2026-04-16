@@ -170,6 +170,7 @@ def test_new_machine_media_creates_media_dir_and_uses_dolphin(
         profile_service=profile_service,
     )
     game_dir = tmp_path / "game"
+    game_dir.mkdir()
     media_dir = game_dir / ".dosmachines" / "media"
     dialog.game_dir_edit.setText(str(game_dir))
 
@@ -204,6 +205,7 @@ def test_new_machine_media_falls_back_to_xdg_open(
         tmp_path / "workspace", settings_service, engine_registry, preset_service
     )
     game_dir = tmp_path / "game"
+    game_dir.mkdir()
     media_dir = game_dir / ".dosmachines" / "media"
     dialog.game_dir_edit.setText(str(game_dir))
 
@@ -236,6 +238,31 @@ def test_new_machine_media_warns_when_game_dir_is_empty(tmp_path: Path) -> None:
 
     warning.assert_called_once()
     popen.assert_not_called()
+
+
+def test_media_button_is_enabled_only_for_existing_game_directory(
+    tmp_path: Path,
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace", settings_service, engine_registry, preset_service
+    )
+
+    assert not dialog._media_button.isEnabled()
+
+    dialog.game_dir_edit.setText(str(tmp_path / "missing-game"))
+
+    assert not dialog._media_button.isEnabled()
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    dialog.game_dir_edit.setText(str(game_dir))
+
+    assert dialog._media_button.isEnabled()
 
 
 def test_existing_profile_does_not_resubmit_current_icon_as_new_source(
@@ -332,6 +359,7 @@ def test_configure_machine_media_uses_edited_game_dir(
         profile_service=profile_service,
     )
     moved_dir = tmp_path / "moved-game"
+    moved_dir.mkdir()
     media_dir = moved_dir / ".dosmachines" / "media"
     dialog.game_dir_edit.setText(str(moved_dir))
 

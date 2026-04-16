@@ -823,11 +823,11 @@ class CreateMachineDialog(QDialog):
 
     def _open_media(self) -> None:
         game_dir_text = self.game_dir_edit.text().strip()
-        if not game_dir_text:
+        if not self._has_valid_game_dir():
             QMessageBox.warning(
                 self,
-                "Missing Game Directory",
-                "Choose a game directory before opening media.",
+                "Invalid Game Directory",
+                "Choose an existing game directory before opening media.",
             )
             return
         game_dir = Path(game_dir_text).expanduser()
@@ -1055,6 +1055,14 @@ class CreateMachineDialog(QDialog):
         self._save_machine_preset_button.setEnabled(enabled)
         self._apply_user_preset_button.setEnabled(enabled)
         self._apply_system_preset_button.setEnabled(enabled)
+        self._sync_media_button()
+
+    def _sync_media_button(self) -> None:
+        self._media_button.setEnabled(self._has_valid_game_dir())
+
+    def _has_valid_game_dir(self) -> bool:
+        game_dir_text = self.game_dir_edit.text().strip()
+        return bool(game_dir_text) and Path(game_dir_text).expanduser().is_dir()
 
     def _save_machine_preset(self) -> None:
         if self._schema is None:
@@ -1304,6 +1312,7 @@ class CreateMachineDialog(QDialog):
     def _handle_metadata_changed(self) -> None:
         if self._recovery_mode:
             self._hydrate_recovery_source()
+        self._sync_media_button()
         self._update_preview()
 
     def _hydrate_recovery_source(self) -> None:
