@@ -52,6 +52,7 @@ from dos_machines.domain.models import (
     SchemaOption,
     SchemaSection,
 )
+from dos_machines.ui.media import launch_media_manager
 
 
 class NoWheelMixin:
@@ -633,6 +634,8 @@ class CreateMachineDialog(QDialog):
         self._change_icon_button.clicked.connect(self._choose_icon)
         self._default_icon_button = QPushButton("Default Icon")
         self._default_icon_button.clicked.connect(self._use_default_icon)
+        self._media_button = QPushButton("Media")
+        self._media_button.clicked.connect(self._open_media)
 
         self.game_dir_edit.textChanged.connect(self._handle_metadata_changed)
         self.engine_binary_edit.textChanged.connect(self._update_preview)
@@ -723,7 +726,9 @@ class CreateMachineDialog(QDialog):
         form.addRow("Title", self.title_edit)
         form.addRow(
             "Game Directory",
-            self._with_browse(self.game_dir_edit, self._browse_game_dir),
+            self._with_browse(
+                self.game_dir_edit, self._browse_game_dir, self._media_button
+            ),
         )
         form.addRow(
             "Engine Binary",
@@ -783,12 +788,16 @@ class CreateMachineDialog(QDialog):
         layout.addWidget(self._raw_import_edit)
         return tab
 
-    def _with_browse(self, line_edit: QLineEdit, callback) -> QHBoxLayout:
+    def _with_browse(
+        self, line_edit: QLineEdit, callback, *extra_buttons: QPushButton
+    ) -> QHBoxLayout:
         button = QPushButton("Browse…")
         button.clicked.connect(callback)
         layout = QHBoxLayout()
         layout.addWidget(line_edit)
         layout.addWidget(button)
+        for extra_button in extra_buttons:
+            layout.addWidget(extra_button)
         return layout
 
     def _browse_game_dir(self) -> None:
@@ -806,6 +815,27 @@ class CreateMachineDialog(QDialog):
         if path:
             self.engine_binary_edit.setText(path)
             self._load_schema_if_possible()
+
+    def _open_media(self) -> None:
+        game_dir_text = self.game_dir_edit.text().strip()
+        if not game_dir_text:
+            QMessageBox.warning(
+                self,
+                "Missing Game Directory",
+                "Choose a game directory before opening media.",
+            )
+            return
+        game_dir = Path(game_dir_text).expanduser()
+        media_dir = (
+            self._profile_service.media_dir_for_game(game_dir)
+            if self._profile_service is not None
+            else game_dir / ".dosmachines" / "media"
+        )
+        try:
+            media_dir.mkdir(parents=True, exist_ok=True)
+            launch_media_manager(media_dir)
+        except Exception as exc:  # pragma: no cover - UI safety net
+            QMessageBox.critical(self, "Open Media Failed", str(exc))
 
     def _choose_icon(self) -> None:
         filters = "Icons and Images (*.png *.svg *.svgz *.xpm *.ico *.icns *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)"

@@ -166,8 +166,8 @@ def test_open_machine_media_creates_media_dir_and_uses_dolphin(tmp_path: Path, m
     window, _ = _main_window(tmp_path)
     media_dir = profile.game.game_dir / ".dosmachines" / "media"
 
-    monkeypatch.setattr("dos_machines.ui.main_window.shutil.which", lambda name: "/usr/bin/dolphin" if name == "dolphin" else None)
-    with patch("dos_machines.ui.main_window.subprocess.Popen") as popen:
+    monkeypatch.setattr("dos_machines.ui.media.shutil.which", lambda name: "/usr/bin/dolphin" if name == "dolphin" else None)
+    with patch("dos_machines.ui.media.subprocess.Popen") as popen:
         window._open_machine_media(launcher)
 
     assert media_dir.exists()
@@ -182,10 +182,10 @@ def test_open_machine_media_falls_back_to_xdg_open(tmp_path: Path, monkeypatch) 
     media_dir = profile.game.game_dir / ".dosmachines" / "media"
 
     monkeypatch.setattr(
-        "dos_machines.ui.main_window.shutil.which",
+        "dos_machines.ui.media.shutil.which",
         lambda name: "/usr/bin/xdg-open" if name == "xdg-open" else None,
     )
-    with patch("dos_machines.ui.main_window.subprocess.Popen") as popen:
+    with patch("dos_machines.ui.media.subprocess.Popen") as popen:
         window._open_machine_media(launcher)
 
     args, kwargs = popen.call_args
@@ -211,7 +211,7 @@ def test_open_machine_media_warns_for_broken_launcher(tmp_path: Path) -> None:
     )
     window, _ = _main_window(tmp_path)
 
-    with patch("dos_machines.ui.main_window.QMessageBox.warning") as warning, patch("dos_machines.ui.main_window.subprocess.Popen") as popen:
+    with patch("dos_machines.ui.main_window.QMessageBox.warning") as warning, patch("dos_machines.ui.media.subprocess.Popen") as popen:
         window._open_machine_media(launcher)
 
     warning.assert_called_once()

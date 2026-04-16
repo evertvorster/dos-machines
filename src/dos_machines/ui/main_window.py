@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import shlex
-import shutil
-import subprocess
 
 from PySide6.QtCore import QAbstractListModel, QDir, QFile, QModelIndex, QMimeData, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QFontMetrics, QIcon, QTextLayout
@@ -33,6 +31,7 @@ from dos_machines.application.workspace_service import WorkspaceService
 from dos_machines.domain.models import MachineProfile
 from dos_machines.ui.create_machine_dialog import CreateMachineDialog
 from dos_machines.ui.host_config_dialog import HostConfigDialog
+from dos_machines.ui.media import launch_media_manager
 
 
 class WorkspaceListModel(QAbstractListModel):
@@ -494,6 +493,7 @@ class MainWindow(QMainWindow):
             self._engine_registry,
             self._preset_service,
             import_service=self._import_service,
+            profile_service=self._profile_service,
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -565,6 +565,7 @@ class MainWindow(QMainWindow):
                 self._preset_service,
                 import_service=self._import_service,
                 import_analysis=analysis,
+                profile_service=self._profile_service,
                 parent=self,
             )
             if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -590,6 +591,7 @@ class MainWindow(QMainWindow):
                         self._preset_service,
                         import_service=self._import_service,
                         import_analysis=analysis,
+                        profile_service=self._profile_service,
                         parent=self,
                     )
                     if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -762,20 +764,9 @@ class MainWindow(QMainWindow):
         media_dir = self._profile_service.media_dir_for_game(entry.profile_path.parent.parent)
         media_dir.mkdir(parents=True, exist_ok=True)
         try:
-            self._launch_media_manager(media_dir)
+            launch_media_manager(media_dir)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Open Media Failed", str(exc))
-
-    def _launch_media_manager(self, media_dir: Path) -> None:
-        dolphin = shutil.which("dolphin")
-        if dolphin:
-            subprocess.Popen([dolphin, str(media_dir)], start_new_session=True)
-            return
-        opener = shutil.which("xdg-open")
-        if opener:
-            subprocess.Popen([opener, str(media_dir)], start_new_session=True)
-            return
-        raise FileNotFoundError("Could not find Dolphin or xdg-open to open the media folder.")
 
     def _infer_game_dir_from_entry(self, entry) -> Path | None:
         if entry.profile_path is not None:

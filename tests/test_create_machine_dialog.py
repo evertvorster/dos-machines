@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import stat
 from types import MethodType
+from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
@@ -150,6 +151,87 @@ def test_icon_selection_prefers_capture_directory(tmp_path: Path) -> None:
     assert dialog._icon_start_dir() == capture_dir
 
 
+def test_new_machine_media_creates_media_dir_and_uses_dolphin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        profile_service=profile_service,
+    )
+    game_dir = tmp_path / "game"
+    media_dir = game_dir / ".dosmachines" / "media"
+    dialog.game_dir_edit.setText(str(game_dir))
+
+    monkeypatch.setattr(
+        "dos_machines.ui.media.shutil.which",
+        lambda name: "/usr/bin/dolphin" if name == "dolphin" else None,
+    )
+    with patch("dos_machines.ui.media.subprocess.Popen") as popen:
+        dialog._open_media()
+
+    assert media_dir.exists()
+    args, kwargs = popen.call_args
+    assert args[0] == ["/usr/bin/dolphin", str(media_dir)]
+    assert kwargs["start_new_session"] is True
+
+
+def test_new_machine_media_falls_back_to_xdg_open(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace", settings_service, engine_registry, preset_service
+    )
+    game_dir = tmp_path / "game"
+    media_dir = game_dir / ".dosmachines" / "media"
+    dialog.game_dir_edit.setText(str(game_dir))
+
+    monkeypatch.setattr(
+        "dos_machines.ui.media.shutil.which",
+        lambda name: "/usr/bin/xdg-open" if name == "xdg-open" else None,
+    )
+    with patch("dos_machines.ui.media.subprocess.Popen") as popen:
+        dialog._open_media()
+
+    args, kwargs = popen.call_args
+    assert args[0] == ["/usr/bin/xdg-open", str(media_dir)]
+    assert kwargs["start_new_session"] is True
+
+
+def test_new_machine_media_warns_when_game_dir_is_empty(tmp_path: Path) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace", settings_service, engine_registry, preset_service
+    )
+
+    with patch(
+        "dos_machines.ui.create_machine_dialog.QMessageBox.warning"
+    ) as warning, patch("dos_machines.ui.media.subprocess.Popen") as popen:
+        dialog._open_media()
+
+    warning.assert_called_once()
+    popen.assert_not_called()
+
+
 def test_existing_profile_does_not_resubmit_current_icon_as_new_source(
     tmp_path: Path,
 ) -> None:
@@ -200,6 +282,63 @@ def test_existing_profile_does_not_resubmit_current_icon_as_new_source(
 
     assert request.icon_source is None
     assert request.remove_icon is False
+
+
+def test_configure_machine_media_uses_edited_game_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _app()
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    settings_service.load()
+    preset_service = PresetService(settings_service.app_paths)
+    engine_registry = EngineRegistry(settings_service.app_paths)
+    profile_service = ProfileService(
+        settings_service.app_paths, engine_registry, ConfigRenderer()
+    )
+    binary = _fake_binary(tmp_path / "bin" / "dosbox")
+    cache = engine_registry.register(binary)
+    schema = engine_registry.load_schema(cache.ref.engine_id)
+    profile = profile_service.create(
+        CreateProfileRequest(
+            title="Moved Game",
+            game_dir=tmp_path / "original-game",
+            executable="GAME.EXE",
+            engine_binary=binary,
+            workspace_dir=tmp_path / "workspace",
+            option_states={
+                section.name: {
+                    option.name: OptionState(
+                        value=option.default_value, checked=True, origin="default"
+                    )
+                    for option in section.options
+                }
+                for section in schema.sections
+                if section.name != "autoexec"
+            },
+        )
+    )
+    dialog = CreateMachineDialog(
+        tmp_path / "workspace",
+        settings_service,
+        engine_registry,
+        preset_service,
+        profile=profile,
+        profile_service=profile_service,
+    )
+    moved_dir = tmp_path / "moved-game"
+    media_dir = moved_dir / ".dosmachines" / "media"
+    dialog.game_dir_edit.setText(str(moved_dir))
+
+    monkeypatch.setattr(
+        "dos_machines.ui.media.shutil.which",
+        lambda name: "/usr/bin/dolphin" if name == "dolphin" else None,
+    )
+    with patch("dos_machines.ui.media.subprocess.Popen") as popen:
+        dialog._open_media()
+
+    assert media_dir.exists()
+    args, _ = popen.call_args
+    assert args[0] == ["/usr/bin/dolphin", str(media_dir)]
 
 
 def test_section_editor_collapses_multiline_help_by_default(tmp_path: Path) -> None:
