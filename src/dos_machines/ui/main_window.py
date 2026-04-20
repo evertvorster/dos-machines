@@ -194,12 +194,25 @@ class WorkspaceFileView(QListView):
         super().__init__(parent)
         self._import_handler = None
         self._icon_resize_handler = None
+        self._middle_click_handler = None
 
     def set_import_handler(self, handler) -> None:
         self._import_handler = handler
 
     def set_icon_resize_handler(self, handler) -> None:
         self._icon_resize_handler = handler
+
+    def set_middle_click_handler(self, handler) -> None:
+        self._middle_click_handler = handler
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid() and self._middle_click_handler is not None:
+                self._middle_click_handler(index)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:
         if (
@@ -404,6 +417,7 @@ class MainWindow(QMainWindow):
         self._view.setModel(self._list_model)
         self._view.set_import_handler(self._import_paths)
         self._view.set_icon_resize_handler(self._resize_icons)
+        self._view.set_middle_click_handler(self._configure_index)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._open_context_menu)
         self._view.activated.connect(self._activate_index)
@@ -687,6 +701,14 @@ class MainWindow(QMainWindow):
             self._launcher_service.launch_launcher(path)
         except Exception as exc:  # pragma: no cover - UI safety net
             QMessageBox.critical(self, "Launch Failed", str(exc))
+
+    def _configure_index(self, index) -> None:
+        if self._list_model.is_up_item(index):
+            return
+        path = self._list_model.file_path(index)
+        if path is None or path.is_dir() or path.suffix != ".desktop":
+            return
+        self._configure_launcher(path)
 
     def _open_directory(self, path: Path) -> None:
         self._current_dir = path

@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication
 
@@ -116,6 +116,88 @@ def test_main_window_uses_warning_icon_for_broken_launcher(tmp_path: Path) -> No
     assert icon is not None
     assert not icon.isNull()
     assert icon.pixmap(16, 16).toImage() == warning_icon.pixmap(16, 16).toImage()
+
+
+def _write_launcher(workspace_dir: Path, title: str, profile_path: Path | None = None) -> Path:
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    if profile_path is None:
+        profile_path = workspace_dir / title / ".dosmachines" / "profile.json"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text("{}", encoding="utf-8")
+    launcher = workspace_dir / f"{title}.desktop"
+    launcher.write_text(
+        "\n".join(
+            [
+                "[Desktop Entry]",
+                "Type=Application",
+                f"Name={title}",
+                "Exec=/bin/true",
+                f"X-DOSMachines-ProfilePath={profile_path}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return launcher
+
+
+def _index_for_path(window: MainWindow, path: Path):
+    window._list_model.set_current_dir(path.parent)
+    QApplication.processEvents()
+    for row in range(window._list_model.rowCount()):
+        index = window._list_model.index(row, 0)
+        if window._list_model.file_path(index) == path:
+            return index
+    raise AssertionError(f"No index for {path}")
+
+
+def test_activating_machine_launcher_launches_machine(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    launcher = _write_launcher(settings_service.load().workspace_path, "Launch Game")
+    window, _ = _main_window(tmp_path)
+    index = _index_for_path(window, launcher)
+
+    with patch.object(window._launcher_service, "launch_launcher") as launch, patch.object(window, "_configure_launcher") as configure:
+        window._activate_index(index)
+
+    launch.assert_called_once_with(launcher)
+    configure.assert_not_called()
+
+
+def test_configure_index_opens_machine_configuration(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    launcher = _write_launcher(settings_service.load().workspace_path, "Configure Game")
+    window, _ = _main_window(tmp_path)
+    index = _index_for_path(window, launcher)
+
+    with patch.object(window._launcher_service, "launch_launcher") as launch, patch.object(window, "_configure_launcher") as configure:
+        window._configure_index(index)
+
+    configure.assert_called_once_with(launcher)
+    launch.assert_not_called()
+
+
+def test_configure_index_ignores_non_machine_entries(tmp_path: Path) -> None:
+    settings_service = SettingsService(config_root=tmp_path / "config")
+    workspace = settings_service.load().workspace_path
+    folder = workspace / "Folder"
+    folder.mkdir()
+    note = workspace / "note.txt"
+    note.write_text("plain file", encoding="utf-8")
+    child = workspace / "Child"
+    child.mkdir()
+    window, _ = _main_window(tmp_path)
+
+    with patch.object(window, "_configure_launcher") as configure:
+        window._configure_index(QModelIndex())
+        window._configure_index(_index_for_path(window, folder))
+        window._configure_index(_index_for_path(window, note))
+
+        window._list_model.set_current_dir(child)
+        QApplication.processEvents()
+        window._configure_index(window._list_model.index(0, 0))
+
+    configure.assert_not_called()
 
 
 def _machine_launcher(tmp_path: Path):
