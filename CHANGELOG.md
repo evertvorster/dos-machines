@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- DOSBox child processes leaving zombie (`<defunct>`) entries after the launcher window closes. The `Popen` object is now kept alive in `LauncherService`, preventing premature garbage collection.
+- DOSBox child processes lingering as zombie (`<defunct>`) entries after exiting. The parent app never reaped the child's exit status. Fixed by spawning a daemon thread that calls `process.wait()` immediately after launching, so the exit status is collected without blocking the UI. The `Popen` object is also kept alive in `LauncherService` to prevent premature garbage collection.
 
 ## [0.2.4] - 2026-04-20
 

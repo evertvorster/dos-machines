@@ -57,11 +57,16 @@ def test_launch_launcher_runs_exec_in_desktop_entry_path(tmp_path: Path) -> None
 
     service = LauncherService()
     with patch("subprocess.Popen") as popen:
+        mock_process = popen.return_value
         service.launch_launcher(launcher)
 
-    args, kwargs = popen.call_args
-    assert args[0] == ["/usr/bin/dosbox", "-conf", "/tmp/test.conf"]
-    assert kwargs["cwd"] == str(workdir)
+        popen.assert_called_once_with(
+            ["/usr/bin/dosbox", "-conf", "/tmp/test.conf"],
+            cwd=str(workdir),
+            start_new_session=True,
+        )
+        assert service._current_process is mock_process
+        assert mock_process.wait.called
 
 
 def test_launcher_without_exec_raises(tmp_path: Path) -> None:

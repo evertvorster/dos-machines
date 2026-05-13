@@ -4,6 +4,7 @@ import configparser
 from pathlib import Path
 import shlex
 import subprocess
+import threading
 
 from dos_machines.application.engine_support import MANAGED_CONFIG_FILENAME
 from dos_machines.domain.models import MachineProfile
@@ -89,9 +90,13 @@ class LauncherService:
         if not exec_value:
             raise ValueError(f"Desktop entry has no Exec line: {launcher_path}")
         working_dir = section.get("Path", "").strip() or None
-        self._current_process = subprocess.Popen(
+        process = subprocess.Popen(
             shlex.split(exec_value),
             cwd=working_dir,
             start_new_session=True,
         )
-        return self._current_process
+        self._current_process = process
+        # Reap the child in a daemon thread so the exit status is collected
+        # and the process does not linger as a zombie (defunct) entry.
+        threading.Thread(target=process.wait, daemon=True).start()
+        return process
