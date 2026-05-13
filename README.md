@@ -28,6 +28,10 @@ The package installs:
 
 `dosbox-staging` is a runtime dependency of the package.
 
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the core model, service layout, persistence locations, and main workflows.
+
 ## Development
 
 Install dependencies and run the app:

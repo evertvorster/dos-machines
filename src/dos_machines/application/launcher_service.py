@@ -10,6 +10,9 @@ from dos_machines.domain.models import MachineProfile
 
 
 class LauncherService:
+    def __init__(self) -> None:
+        self._current_process: subprocess.Popen | None = None
+
     def create_launcher(self, profile: MachineProfile, workspace_dir: Path) -> Path:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         launcher_path = workspace_dir / f"{profile.identity.title}.desktop"
@@ -76,7 +79,7 @@ class LauncherService:
         ]
         return "\n".join(lines)
 
-    def launch_launcher(self, launcher_path: Path) -> None:
+    def launch_launcher(self, launcher_path: Path) -> subprocess.Popen:
         parser = configparser.ConfigParser(interpolation=None)
         parser.read(launcher_path, encoding="utf-8")
         if not parser.has_section("Desktop Entry"):
@@ -86,8 +89,9 @@ class LauncherService:
         if not exec_value:
             raise ValueError(f"Desktop entry has no Exec line: {launcher_path}")
         working_dir = section.get("Path", "").strip() or None
-        subprocess.Popen(
+        self._current_process = subprocess.Popen(
             shlex.split(exec_value),
             cwd=working_dir,
             start_new_session=True,
         )
+        return self._current_process
